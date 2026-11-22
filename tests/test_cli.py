@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from support import ContainerTest, call, e2e_skip_reason, png_colour_count
 
@@ -129,6 +132,54 @@ class AgentSurface(ContainerTest):
         code, out, _ = call("logs", self.desktop, "-n", "5")
         self.assertEqual(code, 0)
         self.assertIsInstance(out, str)
+
+
+class BindMounts(unittest.TestCase):
+    """The project under test has to be visible inside the desktop."""
+
+    desktop = "e2e-bind"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        reason = e2e_skip_reason()
+        if reason:
+            raise unittest.SkipTest(reason)
+        cls.work = tempfile.mkdtemp(prefix="deskbench-bind-")
+        Path(cls.work, "hello.txt").write_text("from the host\n")
+        cls.mounted = f"/mnt/{os.path.basename(cls.work)}"
+        call("stop", cls.desktop)
+        code, _, err = call("new", "--name", cls.desktop, "--size", "800x600",
+                            "--bind", cls.work,
+                            "--bind", f"{cls.work}:/mnt/readonly:ro")
+        if code != 0:
+            shutil.rmtree(cls.work, ignore_errors=True)
+            raise unittest.SkipTest(f"could not start {cls.desktop}: {err.strip()}")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        call("stop", cls.desktop)
+        shutil.rmtree(cls.work, ignore_errors=True)
+
+    def test_host_file_is_visible_inside(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "deskbench", "exec", self.desktop, "--",
+             "cat", f"{self.mounted}/hello.txt"],
+            cwd=PACKAGE_ROOT, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("from the host", result.stdout)
+
+    def test_writes_round_trip_to_the_host(self):
+        code, _, err = call("exec", self.desktop, "--", "sh", "-c",
+                            f"echo made-inside > {self.mounted}/made.txt")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Path(self.work, "made.txt").read_text().strip(), "made-inside")
+
+    def test_read_only_mount_refuses_writes(self):
+        code, _, _ = call("exec", self.desktop, "--", "sh", "-c",
+                          "touch /mnt/readonly/nope")
+        self.assertNotEqual(code, 0, "a read-only mount accepted a write")
+        self.assertFalse(Path(self.work, "nope").exists())
 
 
 class Failures(unittest.TestCase):

@@ -13,8 +13,11 @@ to parse prose.
   - `--name` is honoured; without it the first free `deskN` is used.
   - `--size WxH` reaches every new container; invalid sizes are refused before anything starts.
   - `--image` overrides the image reference for that one desktop.
+  - `--bind SRC[:DST][:ro]` makes a host path visible inside, repeatable; the destination defaults
+    to `/mnt/<basename>` and mounts are read-write unless `:ro` is given.
+  - A missing bind source or a relative destination is refused before any container starts.
   - A duplicate name fails with exit 1 and a message naming the desktop.
-- Tests: tests.test_cli.Desktops.test_new_reports_a_usable_desktop, tests.test_cli.Failures.test_invalid_name_is_rejected, tests.test_sessions.Names.test_accepts_ordinary_names, tests.test_sessions.Names.test_next_free_name_fills_the_first_gap, tests.test_sessions.Sizes.test_accepts_plausible_geometry
+- Tests: tests.test_cli.Desktops.test_new_reports_a_usable_desktop, tests.test_cli.Failures.test_invalid_name_is_rejected, tests.test_sessions.Names.test_accepts_ordinary_names, tests.test_sessions.Names.test_next_free_name_fills_the_first_gap, tests.test_sessions.Sizes.test_accepts_plausible_geometry, tests.test_cli.BindMounts.test_host_file_is_visible_inside, tests.test_cli.BindMounts.test_writes_round_trip_to_the_host, tests.test_cli.BindMounts.test_read_only_mount_refuses_writes, tests.test_sessions.Binds.test_defaults_to_mnt_and_read_write, tests.test_sessions.Binds.test_explicit_destination_and_read_only, tests.test_sessions.Binds.test_rejects_missing_source, tests.test_sessions.Binds.test_rejects_relative_destination
 
 ### List desktops
 `deskbench ls` shows every running desktop and its viewer URL, in a table for humans and as JSON for

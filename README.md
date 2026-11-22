@@ -34,7 +34,7 @@ browser, or click the tray icon and choose *Open viewer*.
 ## Usage
 
 ```
-deskbench new [--name NAME] [--size WxH]   start a desktop, print {name, url, id}
+deskbench new [--name NAME] [--size WxH] [--bind SRC[:DST][:ro]]   start a desktop, print {name, url, id}
 deskbench ls [--json]                      list desktops
 deskbench url NAME                         print the viewer URL
 deskbench exec NAME -- CMD...              run a command inside the desktop

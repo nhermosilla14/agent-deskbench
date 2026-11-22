@@ -119,9 +119,17 @@ def ensure_image(image: str = IMAGE) -> None:
     _podman(["build", "-t", image, str(IMAGE_CONTEXT)], capture=False)
 
 
-def create(name: str, size: str = sessions.DEFAULT_SIZE, image: str = IMAGE) -> Desktop:
+def create(
+    name: str,
+    size: str = sessions.DEFAULT_SIZE,
+    image: str = IMAGE,
+    binds: list[sessions.Bind] | None = None,
+) -> Desktop:
     container = sessions.container_name(name)
     ensure_image(image)
+    volumes: list[str] = []
+    for bind in binds or []:
+        volumes.extend(["-v", bind.as_volume()])
     _podman(
         [
             "run",
@@ -131,6 +139,7 @@ def create(name: str, size: str = sessions.DEFAULT_SIZE, image: str = IMAGE) -> 
             container,
             "--label",
             sessions.LABEL,
+            *volumes,
             "-p",
             f"127.0.0.1::{sessions.WEB_PORT}",
             "-e",

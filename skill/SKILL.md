@@ -68,6 +68,21 @@ deskbench stop check
 
 Names are lowercase letters, digits and hyphens. Without `--name` you get `desk1`, `desk2`, and so on.
 
+## Your project inside the desktop
+
+The desktop starts as a bare Debian; mount the code you are working on:
+
+```sh
+deskbench new --name dev --bind .                      # → /mnt/<directory name>
+deskbench new --name dev --bind ~/src/app:/work        # explicit destination
+deskbench new --name dev --bind ~/datasets:/data:ro    # read-only
+
+deskbench exec dev -- sh -c 'cd /mnt/app && ./build/my-app'
+```
+
+Mounts are read-write unless you say `:ro`, and changes round-trip to the host, so an edit on the
+host is visible inside without restarting the desktop.
+
 ## Handing control to a human
 
 Use `ask` when a decision, a login, a CAPTCHA or a visual judgement is beyond you. It shows a desktop
@@ -93,9 +108,9 @@ screen has changed underneath you.
   check `logs` and that you launched it inside the desktop.
 - **`stop` destroys everything.** The container is `--rm`, so files, installed packages and app state
   vanish. Do not stop until you have what you need.
-- **The image is a bare Debian plus X tooling**, not your project. Install missing packages with
-  `deskbench exec NAME -- sudo apt-get install -y ...` — you are root inside — or copy a built binary
-  in with `podman cp`. Nothing is mounted automatically.
+- **The image is a bare Debian plus X tooling**, not your project. Bring the checkout in with
+  `--bind` (next section) and install missing packages with
+  `deskbench exec NAME -- sudo apt-get install -y ...` — you are root inside.
 - **Always create desktops through `deskbench new`.** A bare `podman run` has no label, so `ls` and the
   tray will not see it.
 - **One desktop can be asked about at a time**, and the human sees one notification per request.

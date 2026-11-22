@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+from dataclasses import dataclass
 
 PREFIX = "deskbench-"
 LABEL = "deskbench=1"
@@ -55,3 +57,43 @@ def next_free_name(taken: list[str]) -> str:
 
 def viewer_url(host_port: int, host: str = "127.0.0.1") -> str:
     return f"http://{host}:{host_port}/vnc.html?autoconnect=1&resize=scale"
+
+
+@dataclass(frozen=True)
+class Bind:
+    """One host path made visible inside the desktop."""
+
+    source: str
+    target: str
+    read_only: bool = False
+
+    def as_volume(self) -> str:
+        return f"{self.source}:{self.target}" + (":ro" if self.read_only else "")
+
+
+def parse_bind(value: str) -> Bind:
+    """Parse ``SRC[:DST][:ro]``.
+
+    The destination defaults to ``/mnt/<basename>`` because requiring the caller to repeat the
+    name is noise for the common case.
+    """
+    parts = value.split(":")
+    if len(parts) > 3:
+        raise SessionError(f"invalid --bind {value!r}: expected SRC[:DST][:ro]")
+
+    source = os.path.abspath(os.path.expanduser(parts[0]))
+    if not os.path.exists(source):
+        raise SessionError(f"--bind source does not exist: {source}")
+
+    read_only = False
+    if len(parts) == 3:
+        mode = parts[2]
+        if mode not in ("ro", "rw"):
+            raise SessionError(f"invalid --bind mode {mode!r}: use ro or rw")
+        read_only = mode == "ro"
+
+    target = parts[1] if len(parts) >= 2 and parts[1] else f"/mnt/{os.path.basename(source)}"
+    if not target.startswith("/"):
+        raise SessionError(f"--bind destination must be absolute: {target!r}")
+
+    return Bind(source=source, target=target.rstrip("/") or "/", read_only=read_only)

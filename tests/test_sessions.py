@@ -40,6 +40,32 @@ class Sizes(unittest.TestCase):
                 sessions.validate_size(size)
 
 
+class Binds(unittest.TestCase):
+    def test_defaults_to_mnt_and_read_write(self):
+        bind = sessions.parse_bind("/tmp")
+        self.assertEqual(bind.source, "/tmp")
+        self.assertEqual(bind.target, "/mnt/tmp")
+        self.assertFalse(bind.read_only)
+        self.assertEqual(bind.as_volume(), "/tmp:/mnt/tmp")
+
+    def test_explicit_destination_and_read_only(self):
+        bind = sessions.parse_bind("/tmp:/work:ro")
+        self.assertEqual((bind.target, bind.read_only), ("/work", True))
+        self.assertEqual(bind.as_volume(), "/tmp:/work:ro")
+
+    def test_rejects_missing_source(self):
+        with self.assertRaises(sessions.SessionError):
+            sessions.parse_bind("/nope/definitely-not-here")
+
+    def test_rejects_relative_destination(self):
+        with self.assertRaises(sessions.SessionError):
+            sessions.parse_bind("/tmp:relative/path")
+
+    def test_rejects_unknown_mode(self):
+        with self.assertRaises(sessions.SessionError):
+            sessions.parse_bind("/tmp:/work:rx")
+
+
 class Urls(unittest.TestCase):
     def test_viewer_url_autoconnects(self):
         url = sessions.viewer_url(41234)

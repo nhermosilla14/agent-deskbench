@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--name", help="desktop name (default: first free deskN)")
     new.add_argument("--size", default=sessions.DEFAULT_SIZE, help="screen geometry, WxH")
     new.add_argument("--image", help=f"override the container image (default {engine.IMAGE})")
+    new.add_argument("--bind", action="append", default=[], metavar="SRC[:DST][:ro]",
+                     help="make a host path visible inside the desktop (repeatable)")
     new.set_defaults(handler=cmd_new)
 
     listing = subparsers.add_parser("ls", help="list desktops")
@@ -108,7 +110,8 @@ def cmd_new(args: argparse.Namespace) -> int:
     if name in existing:
         raise EngineError(f"desktop {name!r} already exists; pick another name or stop it")
     size = sessions.validate_size(args.size)
-    desktop = engine.create(name, size, args.image or engine.IMAGE)
+    binds = [sessions.parse_bind(value) for value in args.bind]
+    desktop = engine.create(name, size, args.image or engine.IMAGE, binds)
     try:
         _spawn_tray()
     except OSError as exc:
