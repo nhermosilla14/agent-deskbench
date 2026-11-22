@@ -12,7 +12,9 @@ talk to each other.
 
 - Linux with a StatusNotifierItem panel (KDE Plasma or GNOME with the AppIndicator extension).
 - Python 3.11 or newer (`3.14` is what it is developed against). No third-party Python packages.
-- Podman (rootless is fine), with `/usr/bin/podman` on `PATH`.
+- **Podman (rootless is fine) or Docker**, with the binary on `PATH`. Podman is used when both are
+  installed; set `DESKBENCH_RUNTIME=docker` to force Docker. Docker must be rootful for bind mounts
+  to keep their ownership.
 - `python3-gi` with GTK 3 and `AyatanaAppIndicator3` — only for the tray and notifications.
 
 ```sh
@@ -105,6 +107,7 @@ Two environment variables exist for automation:
 |---|---|
 | `DESKBENCH_E2E=1` | Run the container-backed tests instead of skipping them |
 | `DESKBENCH_NO_TRAY=1` | Do not spawn the tray (headless test runs) |
+| `DESKBENCH_RUNTIME=podman\|docker` | Force a runtime instead of detecting one |
 
 `ask` exits `0` when the human pressed *I'm done*, `4` on timeout and `5` when the notification was
 dismissed without an answer.

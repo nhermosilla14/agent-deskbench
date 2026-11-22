@@ -28,6 +28,10 @@ deskbench --version
 If that fails, the tool is not installed on this machine. Do not try to install it yourself; say so
 and stop, because the container image build and the tray need a human's environment.
 
+It drives Podman by default and Docker when that is what exists; either way the commands are the
+same. If both are installed and you need Docker for a specific reason, set
+`DESKBENCH_RUNTIME=docker` for the command.
+
 ## The loop
 
 ```sh

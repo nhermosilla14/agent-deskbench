@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 
-from . import engine, lock
+from . import engine, lock, runtime as runtimes
 
 APP_ID = "agent-deskbench"
 ICON_FALLBACKS = ("video-display", "computer", "utilities-terminal")
@@ -120,12 +120,13 @@ def main() -> int:
         return True
 
     def watch_events(stop_event: threading.Event) -> None:
-        """Re-read the desktop list whenever Podman reports a container change."""
+        """Re-read the desktop list whenever the runtime reports a container change."""
+        runtime = runtimes.detect()
+        command = runtimes.events_command(runtime, "deskbench=1")
         while not stop_event.is_set():
             try:
                 proc = subprocess.Popen(
-                    ["podman", "events", "--filter", "type=container",
-                     "--filter", "label=deskbench=1", "--format", "json"],
+                    [runtime.binary, *command],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                     text=True,

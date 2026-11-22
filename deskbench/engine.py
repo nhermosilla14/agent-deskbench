@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import time
@@ -19,7 +18,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import flavours, sessions
+from . import flavours, runtime as runtimes, sessions
 
 IMAGE = os.environ.get("DESKBENCH_IMAGE", flavours.base_tag())
 IMAGE_CONTEXT = Path(__file__).resolve().parent.parent / "image"
@@ -43,11 +42,12 @@ class Desktop:
 
 
 def _podman(args: list[str], *, capture: bool = True, check: bool = True) -> subprocess.CompletedProcess:
-    exe = shutil.which("podman")
-    if exe is None:
-        raise EngineError("podman was not found on PATH; install podman to use deskbench")
+    try:
+        runtime = runtimes.detect()
+    except runtimes.MissingRuntime as exc:
+        raise EngineError(str(exc)) from exc
     proc = subprocess.run(
-        [exe, *args],
+        [runtime.binary, *args],
         capture_output=capture,
         text=True,
         check=False,
@@ -57,43 +57,31 @@ def _podman(args: list[str], *, capture: bool = True, check: bool = True) -> sub
         if detail:
             message = detail[-1] if len(detail) == 1 else " | ".join(detail[-3:])
         elif not capture:
-            message = f"podman {args[0]} failed; see the output above"
+            message = f"{runtime.name} {args[0]} failed; see the output above"
         else:
-            message = f"podman {' '.join(args[:2])} failed"
+            message = f"{runtime.name} {' '.join(args[:2])} failed"
         raise EngineError(message)
     return proc
 
 
-def _host_port(entries: list[dict]) -> int | None:
-    for entry in entries:
-        if entry.get("container_port") == sessions.WEB_PORT and entry.get("protocol", "tcp") == "tcp":
-            port = entry.get("host_port")
-            return int(port) if port else None
-    return None
-
-
 def list_desktops() -> list[Desktop]:
+    runtime = runtimes.detect()
     proc = _podman(["ps", "--filter", f"label={sessions.LABEL}", "--format", "json"])
-    raw = (proc.stdout or "").strip() or "[]"
     try:
-        entries = json.loads(raw)
+        rows = runtimes.parse_ps(proc.stdout or "", runtime)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-        raise EngineError(f"could not read podman output: {exc}") from exc
+        raise EngineError(f"could not read {runtime.name} output: {exc}") from exc
 
     desktops = []
-    for entry in entries:
-        names = entry.get("Names") or []
-        container = names[0] if names else ""
-        if not container:
-            continue
-        port = _host_port(entry.get("Ports") or [])
+    for row in rows:
+        port = row["host_port"]
         desktops.append(
             Desktop(
-                name=sessions.desktop_name(container),
-                container=container,
-                state=entry.get("State", "unknown"),
+                name=sessions.desktop_name(row["name"]),
+                container=row["name"],
+                state=row["state"],
                 url=sessions.viewer_url(port) if port else "",
-                id=entry.get("Id", ""),
+                id=row["id"],
             )
         )
     return sorted(desktops, key=lambda desktop: desktop.name)
@@ -107,7 +95,8 @@ def get(name: str) -> Desktop:
 
 
 def image_exists(image: str = IMAGE) -> bool:
-    return _podman(["image", "exists", image], check=False).returncode == 0
+    runtime = runtimes.detect()
+    return _podman(runtimes.image_exists_args(runtime, image), check=False).returncode == 0
 
 
 def ensure_image(image: str = IMAGE) -> None:
@@ -173,6 +162,7 @@ def create(
     volumes: list[str] = []
     for bind in binds or []:
         volumes.extend(["-v", bind.as_volume()])
+    runtime = runtimes.detect()
     _podman(
         [
             "run",
@@ -182,9 +172,7 @@ def create(
             container,
             "--label",
             sessions.LABEL,
-            # Map the in-image user to whoever invoked the tool, so bind mounts keep their
-            # ownership in both directions.
-            "--userns=keep-id:uid=1000,gid=1000",
+            *runtimes.user_args(runtime),
             *volumes,
             "-p",
             f"127.0.0.1::{sessions.WEB_PORT}",
