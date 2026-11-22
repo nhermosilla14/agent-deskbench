@@ -58,6 +58,16 @@ agent-deskbench/
 └── .agents/skills/           the vendored general-software-development skill
 ```
 
+## For agents
+
+`skill/SKILL.md` is a skill that teaches a coding agent to use this tool: the verbs, the loop, and
+the traps. Install it and the CLI with:
+
+```sh
+task install-cli     # uv tool install --editable . → deskbench in ~/.local/bin
+task install-skill   # copy skill/ to ~/.agents/skills/agent-deskbench
+```
+
 ## Development
 
 ```sh

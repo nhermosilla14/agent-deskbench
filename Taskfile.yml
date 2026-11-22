@@ -31,6 +31,20 @@ tasks:
     cmds:
       - podman build -t {{.IMAGE}} image
 
+  install-cli:
+    desc: Install the deskbench command into ~/.local/bin (editable, via uv)
+    cmds:
+      - uv tool install --force --editable .
+      - deskbench --version
+
+  install-skill:
+    desc: Install this project's skill for agents into ~/.agents/skills
+    cmds:
+      - mkdir -p ~/.agents/skills
+      - rm -rf ~/.agents/skills/agent-deskbench
+      - cp -a skill ~/.agents/skills/agent-deskbench
+      - ls ~/.agents/skills/agent-deskbench
+
   new:
     desc: Start a desktop (example)
     cmds:
