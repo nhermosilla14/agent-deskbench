@@ -44,7 +44,7 @@ FLAVOURS: dict[str, Flavour] = {
     ),
     "chromium": _flavour(
         "chromium",
-        "Base plus Chromium and a chromium-desk wrapper that passes --no-sandbox.",
+        "Base plus Chromium and a chromium-desk wrapper (sandbox on, dev-shm workaround).",
         IMAGE_ROOT / "flavours" / "chromium" / "Dockerfile",
     ),
 }

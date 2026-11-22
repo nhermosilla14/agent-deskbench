@@ -30,7 +30,8 @@ needs; `deskbench images` reports what is available.
   - A flavour builds on demand on top of the base image and is cached under its own tag.
   - An unknown flavour fails with exit 1 and lists the valid names.
   - Each shipped flavour has a Dockerfile that builds on the base tag.
-- Tests: tests.test_flavours.Registry.test_every_flavour_has_a_dockerfile, tests.test_flavours.Registry.test_derived_flavours_build_on_the_base_tag, tests.test_flavours.Registry.test_unknown_flavour_lists_the_valid_ones, tests.test_flavours.Registry.test_tags_are_distinct, tests.test_cli.Flavour.test_chromium_flavour_has_the_browser
+  - The Chromium wrapper does not disable the renderer sandbox.
+- Tests: tests.test_flavours.Registry.test_every_flavour_has_a_dockerfile, tests.test_flavours.Registry.test_derived_flavours_build_on_the_base_tag, tests.test_flavours.Registry.test_unknown_flavour_lists_the_valid_ones, tests.test_flavours.Registry.test_tags_are_distinct, tests.test_flavours.Registry.test_chromium_wrapper_keeps_the_sandbox, tests.test_cli.Flavour.test_chromium_flavour_has_the_browser
 
 ### List desktops
 `deskbench ls` shows every running desktop and its viewer URL, in a table for humans and as JSON for

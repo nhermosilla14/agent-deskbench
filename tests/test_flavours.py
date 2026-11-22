@@ -33,6 +33,11 @@ class Registry(unittest.TestCase):
         for name in flavours.names():
             self.assertIn(name, str(caught.exception))
 
+    def test_chromium_wrapper_keeps_the_sandbox(self):
+        text = flavours.get("chromium").dockerfile.read_text()
+        self.assertNotIn("--no-sandbox", text,
+                         "the renderer sandbox must stay on now that we run unprivileged")
+
     def test_base_is_the_default(self):
         self.assertIn("base", flavours.names())
         self.assertEqual(flavours.tag_for("base"), flavours.base_tag())

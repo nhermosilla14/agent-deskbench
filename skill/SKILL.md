@@ -93,9 +93,10 @@ Rules of thumb:
   so `apt-get install firefox-esr` costs a network round trip *every* session.
 - Stay on `base` when you are going to install packages anyway, or when the app is native. A flavour
   costs one build the first time; installing by hand costs minutes every time.
-- Launch Chromium through `chromium-desk`, which adds `--no-sandbox`. Containers usually still need
-  it, because the inner sandbox lacks the privileges it expects. Chromium then shows a yellow bar
-  warning about the unsupported flag; that is expected here, not a defect in the app.
+- Launch Chromium through `chromium-desk`. It only adds `--disable-dev-shm-usage` (containers have a
+  64 MB `/dev/shm`); the renderer sandbox stays on. If a hardened host blocks unprivileged user
+  namespaces Chromium will refuse to start and say so — then pass `--no-sandbox` yourself and know
+  that you weakened the boundary.
 - The image is fixed when the container starts; choose before you install anything you care about.
 
 ## Your project inside the desktop

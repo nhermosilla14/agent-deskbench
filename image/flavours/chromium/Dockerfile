@@ -1,6 +1,7 @@
 # Browser flavour: the base desktop plus Chromium.
-# Chromium refuses to run without a sandbox it cannot get in most containers, so a wrapper supplies
-# --no-sandbox; call `chromium-desk` instead of `chromium`.
+# The wrapper adds --disable-dev-shm-usage only: /dev/shm is 64 MB in a container, which makes
+# Chromium flaky on heavy pages. The renderer sandbox stays ON — we run as an unprivileged user, so
+# Chromium uses the namespace sandbox.
 ARG BASE=localhost/agent-deskbench/desktop:1
 FROM ${BASE}
 
@@ -11,7 +12,7 @@ RUN apt-get update \
       chromium \
       fonts-liberation \
  && rm -rf /var/lib/apt/lists/* \
- && printf '#!/bin/sh\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage "$@"\n' \
+ && printf '#!/bin/sh\n# --disable-dev-shm-usage only: keep the renderer sandbox.\nexec /usr/bin/chromium --disable-dev-shm-usage "$@"\n' \
       > /usr/local/bin/chromium-desk \
  && chmod +x /usr/local/bin/chromium-desk
 USER 1000
