@@ -2,7 +2,7 @@
 Type=Application
 Name=agent-deskbench tray
 Comment=Show the tray icon when desktop containers survived a reboot
-Exec=python3 -m deskbench tray --adopt
+Exec=python3 -m deskbench tray
 Terminal=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

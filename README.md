@@ -62,9 +62,20 @@ agent-deskbench/
 
 ```sh
 task test        # python3 -m unittest discover -s tests
+task e2e         # the container-backed tests (builds the image, starts desktops)
 task lint        # python3 -m compileall + branch-docs check
 task image       # rebuild the container image
 ```
+
+Two environment variables exist for automation:
+
+| Variable | Effect |
+|---|---|
+| `DESKBENCH_E2E=1` | Run the container-backed tests instead of skipping them |
+| `DESKBENCH_NO_TRAY=1` | Do not spawn the tray (headless test runs) |
+
+`ask` exits `0` when the human pressed *I'm done*, `4` on timeout and `5` when the notification was
+dismissed without an answer.
 
 Work follows the loop in `.agents/skills/general-software-development/`: intents → ADRs → vertical
 slices, one slice at a time, each with an end-to-end test through the CLI.

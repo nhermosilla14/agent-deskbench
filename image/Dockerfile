@@ -12,8 +12,10 @@ RUN apt-get update \
       python3-websockify \
       dbus-x11 \
       xterm \
+      xfonts-base \
       x11-utils \
       scrot \
+      procps \
       fonts-dejavu-core \
       ca-certificates \
  && rm -rf /var/lib/apt/lists/*

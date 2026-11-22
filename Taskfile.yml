@@ -10,9 +10,15 @@ tasks:
       - task --list
 
   test:
-    desc: Run the end-to-end suite (needs Podman)
+    desc: Run the unit suite (container tests are skipped)
     cmds:
       - python3 -m unittest discover -s tests -v
+
+  e2e:
+    desc: Build the image and run the container-backed suite
+    deps: [image]
+    cmds:
+      - DESKBENCH_E2E=1 python3 -m unittest discover -s tests -v
 
   lint:
     desc: Syntax check plus the branch-docs merge gate

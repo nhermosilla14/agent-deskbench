@@ -38,6 +38,7 @@ at zero.
 | `deskbench.cli` | argument parsing and the verb implementations |
 | `deskbench.engine` | the only module that talks to Podman |
 | `deskbench.sessions` | naming, URL derivation, size parsing |
+| `deskbench.lock` | tray singleton and liveness via a lifetime-held flock |
 | `deskbench.tray` | GTK/AppIndicator icon, menu, event loop, flock |
 | `deskbench.notify` | `ask`: notification with actions, blocking until done |
 
