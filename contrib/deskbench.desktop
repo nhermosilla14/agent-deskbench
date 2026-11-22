@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=agent-deskbench tray
+Comment=Show the tray icon when desktop containers survived a reboot
+Exec=python3 -m deskbench tray --adopt
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

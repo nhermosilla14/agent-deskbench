@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How the agent works with its own desktops",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "agent-desktop-flow.html"
+  },
+  "components": [
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Agent",
+      "sublabel": "OpenCode session",
+      "pos": [
+        40,
+        100
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "backend",
+      "label": "deskpane CLI",
+      "sublabel": "new / ls / exec / shot / ask",
+      "pos": [
+        330,
+        100
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "podman",
+      "type": "backend",
+      "label": "Podman",
+      "sublabel": "rootless, label=deskpane",
+      "pos": [
+        660,
+        100
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "desktop",
+      "type": "backend",
+      "label": "Desktop container",
+      "sublabel": "KasmVNC + openbox + app",
+      "pos": [
+        980,
+        100
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "user",
+      "type": "external",
+      "label": "You",
+      "sublabel": "only when asked",
+      "pos": [
+        40,
+        580
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "tray",
+      "type": "frontend",
+      "label": "Tray icon",
+      "sublabel": "AppIndicator, lazy",
+      "pos": [
+        330,
+        400
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "viewer",
+      "type": "frontend",
+      "label": "Browser viewer",
+      "sublabel": "KasmVNC, one port",
+      "pos": [
+        660,
+        400
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "notify",
+      "type": "messagebus",
+      "label": "KDE notifications",
+      "sublabel": "ask + I'm done",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "container",
+      "wraps": [
+        "desktop"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "agent-to-cli",
+      "from": "agent",
+      "to": "cli",
+      "label": "shell tool calls",
+      "variant": "emphasis"
+    },
+    {
+      "id": "cli-to-podman",
+      "from": "cli",
+      "to": "podman",
+      "label": "run / stop / exec",
+      "variant": "emphasis"
+    },
+    {
+      "id": "podman-starts",
+      "from": "podman",
+      "to": "desktop",
+      "label": "starts container"
+    },
+    {
+      "id": "cli-spawns-tray",
+      "from": "cli",
+      "to": "tray",
+      "label": "spawns first, exits last",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "tray-reads",
+      "from": "tray",
+      "to": "podman",
+      "label": "ps + events",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "user-clicks",
+      "from": "user",
+      "to": "tray",
+      "label": "click icon"
+    },
+    {
+      "id": "tray-opens",
+      "from": "tray",
+      "to": "viewer",
+      "label": "xdg-open url"
+    },
+    {
+      "id": "viewer-streams",
+      "from": "viewer",
+      "to": "desktop",
+      "label": "framebuffer + input"
+    },
+    {
+      "id": "cli-asks",
+      "from": "cli",
+      "to": "notify",
+      "label": "ask",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "notify-user",
+      "from": "notify",
+      "to": "user",
+      "label": "you act, press Done",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Agent path",
+      "items": [
+        "CLI is the only supported entry point",
+        "exec / shot / stop drive the container",
+        "Podman holds the state, never the tray"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Human path",
+      "items": [
+        "Tray icon exists only while a desktop runs",
+        "One browser tab per desktop, full input",
+        "ask blocks until you press Done"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Lifecycle",
+      "items": [
+        "First new spawns the tray, which holds a flock",
+        "Last stop or container die exits it",
+        "Nothing stays resident between sessions"
+      ]
+    }
+  ]
+}

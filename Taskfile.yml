@@ -1,0 +1,50 @@
+version: "3"
+
+vars:
+  IMAGE: localhost/agent-deskbench/desktop:1
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  test:
+    desc: Run the end-to-end suite (needs Podman)
+    cmds:
+      - python3 -m unittest discover -s tests -v
+
+  lint:
+    desc: Syntax check plus the branch-docs merge gate
+    cmds:
+      - python3 -m compileall -q deskbench tests
+      - ./scripts/check-branch-docs.sh
+
+  image:
+    desc: Build the desktop image locally
+    cmds:
+      - podman build -t {{.IMAGE}} image
+
+  new:
+    desc: Start a desktop (example)
+    cmds:
+      - python3 -m deskbench new --name alpha
+
+  autostart:
+    desc: Install a desktop entry that starts the tray if desktops survive a reboot
+    status:
+      - test -f ~/.config/autostart/deskbench.desktop
+    cmds:
+      - mkdir -p ~/.config/autostart
+      - cp contrib/deskbench.desktop ~/.config/autostart/
+
+  clean:
+    desc: Remove every desktop container and the image
+    cmds:
+      - podman ps -aq --filter label=deskbench=1 | xargs -r podman rm -f
+      - podman rmi -i {{.IMAGE}} || true
+
+  check-docs:
+    desc: Run the merge gate only
+    cmds:
+      - ./scripts/check-branch-docs.sh
