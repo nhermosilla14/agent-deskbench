@@ -89,9 +89,9 @@ Rules of thumb:
   so `apt-get install firefox-esr` costs a network round trip *every* session.
 - Stay on `base` when you are going to install packages anyway, or when the app is native. A flavour
   costs one build the first time; installing by hand costs minutes every time.
-- Launch Chromium through `chromium-desk`, which adds `--no-sandbox`. Plain `chromium` refuses to
-  start as root, which is what you are inside the container. Chromium then shows a yellow bar
-  warning about the unsupported `--no-sandbox` flag; that is expected here, not a defect in the app.
+- Launch Chromium through `chromium-desk`, which adds `--no-sandbox`. Containers usually still need
+  it, because the inner sandbox lacks the privileges it expects. Chromium then shows a yellow bar
+  warning about the unsupported flag; that is expected here, not a defect in the app.
 - The image is fixed when the container starts; choose before you install anything you care about.
 
 ## Your project inside the desktop
@@ -134,9 +134,12 @@ screen has changed underneath you.
   check `logs` and that you launched it inside the desktop.
 - **`stop` destroys everything.** The container is `--rm`, so files, installed packages and app state
   vanish. Do not stop until you have what you need.
-- **The image is a bare Debian plus X tooling**, not your project. Bring the checkout in with
-  `--bind` (next section) and install missing packages with
-  `deskbench exec NAME -- sudo apt-get install -y ...` — you are root inside.
+- **You are not root inside.** Everything runs as the unprivileged user `agent`, so applications
+  behave as they would on a workstation instead of hitting root-only paths and sandbox refusals.
+  When you genuinely need packages, `sudo` is passwordless:
+  `deskbench exec NAME -- sudo apt-get install -y ...`
+- **Bind mounts keep their ownership**: files you create inside a mount are owned by you on the
+  host, and host files keep their owner inside.
 - **Always create desktops through `deskbench new`.** A bare `podman run` has no label, so `ls` and the
   tray will not see it.
 - **One desktop can be asked about at a time**, and the human sees one notification per request.

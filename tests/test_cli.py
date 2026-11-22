@@ -117,6 +117,16 @@ class AgentSurface(ContainerTest):
             timeout=60,
         )
 
+    def test_commands_run_as_an_unprivileged_user(self):
+        result = self.cli("exec", self.desktop, "--", "id", "-u")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.stdout.strip(), "0", "commands still run as root")
+
+    def test_sudo_is_passwordless(self):
+        result = self.cli("exec", self.desktop, "--", "sudo", "-n", "id", "-u")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0")
+
     def test_exec_propagates_output_and_exit_code(self):
         result = self.cli("exec", self.desktop, "--", "echo", "hello bench")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -181,6 +191,14 @@ class BindMounts(unittest.TestCase):
                             f"echo made-inside > {self.mounted}/made.txt")
         self.assertEqual(code, 0, err)
         self.assertEqual(Path(self.work, "made.txt").read_text().strip(), "made-inside")
+
+    def test_files_created_inside_belong_to_the_host_user(self):
+        code, _, err = call("exec", self.desktop, "--", "sh", "-c",
+                            f"echo owned > {self.mounted}/owned.txt")
+        self.assertEqual(code, 0, err)
+        stat = Path(self.work, "owned.txt").stat()
+        self.assertEqual(stat.st_uid, os.getuid(), "file landed on a subuid")
+        self.assertEqual(stat.st_gid, os.getgid())
 
     def test_read_only_mount_refuses_writes(self):
         code, _, _ = call("exec", self.desktop, "--", "sh", "-c",

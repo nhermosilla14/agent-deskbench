@@ -17,7 +17,7 @@ out=${1:?usage: deskbench-capture OUT [SETTLE_MS] [BUDGET_MS]}
 settle=${2:-250}
 budget=${3:-6000}
 step=100
-reference_file=/run/deskbench-blank.md5
+reference_file=/tmp/deskbench-blank.md5
 
 fingerprint() {
     xwd -root -silent | md5sum | cut -d' ' -f1
@@ -34,6 +34,14 @@ any_client() {
 }
 
 spent=0
+
+# The entrypoint publishes the reference frame once the desktop has finished warming up. Wait for
+# it (bounded), otherwise the very first capture of a fresh desktop would skip phase 2 and return a
+# blank screen.
+while [ "$spent" -lt 3000 ] && [ ! -r "$reference_file" ]; do
+    sleep 0.1
+    spent=$((spent + step))
+done
 
 # Phase 1: is there a client at all? Bounded separately and shorter than the total budget, so a
 # screenshot of an empty desktop answers in about two seconds instead of burning the whole wait.

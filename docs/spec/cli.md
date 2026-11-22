@@ -10,6 +10,8 @@ agent can rely on or fails with a message that names what was wrong.
 to parse prose.
 - Criteria:
   - stdout is a single JSON object with `name`, `url`, `id` and `state`.
+  - The command returns only once the viewer answers, so a GUI client launched immediately can
+    connect instead of racing the entrypoint.
   - `--name` is honoured; without it the first free `deskN` is used.
   - `--size WxH` reaches every new container; invalid sizes are refused before anything starts.
   - `--image` overrides the image reference for that one desktop.
@@ -53,8 +55,10 @@ propagating the exit code.
 - Criteria:
   - stdout and stderr of the command reach the caller.
   - The command's exit code becomes the CLI's exit code.
+  - Commands run as the unprivileged user `agent`, not as root.
+  - `sudo` inside needs no password, for the cases where root is genuinely required.
   - An unknown desktop fails before running anything.
-- Tests: tests.test_cli.AgentSurface.test_exec_propagates_output_and_exit_code, tests.test_cli.AgentSurface.test_exec_propagates_failure
+- Tests: tests.test_cli.AgentSurface.test_exec_propagates_output_and_exit_code, tests.test_cli.AgentSurface.test_exec_propagates_failure, tests.test_cli.AgentSurface.test_commands_run_as_an_unprivileged_user, tests.test_cli.AgentSurface.test_sudo_is_passwordless
 
 ### Capture the screen
 `deskbench shot` writes a PNG of the screen as a human would see it, waiting long enough for the

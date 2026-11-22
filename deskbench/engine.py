@@ -14,6 +14,8 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -137,6 +139,29 @@ def ensure_flavour(name: str) -> str:
     return tag
 
 
+def _viewer_answers(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:
+            return 200 <= response.status < 400
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def wait_ready(desktop: Desktop, timeout: float = 30.0) -> Desktop:
+    """Block until the desktop's viewer answers.
+
+    ``podman run`` returns as soon as the container starts, which is well before the X server and
+    the window manager are usable. A caller that follows ``new`` with a GUI command would race the
+    entrypoint and lose, with no error anyone can see. Waiting here removes the race for everybody.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if desktop.url and _viewer_answers(desktop.url):
+            return desktop
+        time.sleep(0.2)
+    raise EngineError(f"desktop {desktop.name!r} did not become reachable within {timeout:.0f}s")
+
+
 def create(
     name: str,
     size: str = sessions.DEFAULT_SIZE,
@@ -157,6 +182,9 @@ def create(
             container,
             "--label",
             sessions.LABEL,
+            # Map the in-image user to whoever invoked the tool, so bind mounts keep their
+            # ownership in both directions.
+            "--userns=keep-id:uid=1000,gid=1000",
             *volumes,
             "-p",
             f"127.0.0.1::{sessions.WEB_PORT}",
@@ -165,7 +193,7 @@ def create(
             image,
         ]
     )
-    return get(name)
+    return wait_ready(get(name))
 
 
 def stop(name: str) -> None:

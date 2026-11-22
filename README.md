@@ -65,6 +65,9 @@ Flavours build on demand on top of `base` and are cached under their own tag
 
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 
+Everything inside a desktop runs as the unprivileged user `agent`, not root, so applications behave
+as they would on a workstation. `sudo` is available without a password when root is genuinely needed.
+
 ## Project structure
 
 ```

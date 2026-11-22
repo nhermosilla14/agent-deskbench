@@ -45,5 +45,10 @@ at zero.
 ## Boundaries
 
 - The container is the only isolated unit; the host shares its kernel with it.
+- Inside the container everything runs as `agent` (uid 1000). `--userns=keep-id:uid=1000` maps that
+  uid to whoever invoked the tool, so bind-mounted files keep their ownership in both directions and
+  host files never come back owned by a subuid.
+- `sudo` inside the container escalates to the namespace root, which is not the host root: it cannot
+  touch host files the invoking user does not already own.
 - The viewer port is published on `127.0.0.1` only.
 - The tray and the CLI share no state and never call each other; both read Podman.
