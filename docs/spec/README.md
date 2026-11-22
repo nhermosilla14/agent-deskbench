@@ -5,7 +5,7 @@ and the tests that prove it.
 
 | Area | File | Covers |
 |---|---|---|
-| Command line | [`cli.md`](cli.md) | create, list, stop, exec, shot, logs |
+| Command line | [`cli.md`](cli.md) | new, ls, url, exec, shot, logs, stop |
 | Viewer | [`viewer.md`](viewer.md) | the one loopback port and the noVNC URL |
 | Lifecycle | [`lifecycle.md`](lifecycle.md) | tray lifetime and single instance |
 | Handoff | [`handoff.md`](handoff.md) | asking a human and blocking until they answer |

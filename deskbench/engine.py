@@ -13,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from . import sessions
 
 IMAGE = os.environ.get("DESKBENCH_IMAGE", "localhost/agent-deskbench/desktop:1")
 IMAGE_CONTEXT = Path(__file__).resolve().parent.parent / "image"
-SHOT_PATH = "/tmp/deskbench-shot.png"
+SHOT_PATH_TEMPLATE = "/tmp/deskbench-shot-{unique}.png"
 
 
 class EngineError(RuntimeError):
@@ -50,8 +51,13 @@ def _podman(args: list[str], *, capture: bool = True, check: bool = True) -> sub
         check=False,
     )
     if check and proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        message = detail[-1] if detail else f"podman {' '.join(args[:2])} failed"
+        detail = [line for line in (proc.stderr or proc.stdout or "").strip().splitlines() if line.strip()]
+        if detail:
+            message = detail[-1] if len(detail) == 1 else " | ".join(detail[-3:])
+        elif not capture:
+            message = f"podman {args[0]} failed; see the output above"
+        else:
+            message = f"podman {' '.join(args[:2])} failed"
         raise EngineError(message)
     return proc
 
@@ -148,9 +154,11 @@ def exec_in(name: str, command: list[str]) -> int:
 
 def shot(name: str, destination: Path) -> Path:
     container = get(name).container
-    _podman(["exec", container, "scrot", "-o", SHOT_PATH])
+    unique = f"{os.getpid()}-{int(time.time() * 1000)}"
+    remote = SHOT_PATH_TEMPLATE.format(unique=unique)
+    _podman(["exec", container, "scrot", "-o", remote])
     destination.parent.mkdir(parents=True, exist_ok=True)
-    _podman(["cp", f"{container}:{SHOT_PATH}", str(destination)])
+    _podman(["cp", f"{container}:{remote}", str(destination)])
     return destination
 
 

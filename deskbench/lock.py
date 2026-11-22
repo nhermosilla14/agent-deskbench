@@ -23,10 +23,6 @@ def lock_path() -> Path:
     return state_dir() / "tray.lock"
 
 
-def attention_path() -> Path:
-    return state_dir() / "attention"
-
-
 def acquire(path: Path | None = None) -> object | None:
     """Take the tray lock without waiting.
 
@@ -59,23 +55,66 @@ def is_held(path: Path | None = None) -> bool:
         handle.close()
 
 
-def tray_pid(path: Path | None = None) -> int | None:
-    """PID recorded by the tray, if it looks like ours."""
+def _is_tray_process(pid: int) -> bool:
+    """True only for ``python3 -m deskbench tray``, never for a bystander mentioning the name."""
     try:
-        text = (path or lock_path()).read_text().strip()
-        pid = int(text)
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        return False
+    return b"-m" in argv and b"deskbench" in argv and b"tray" in argv
+
+
+def tray_pid(path: Path | None = None) -> int | None:
+    """PID recorded by the tray, if the process still looks like ours."""
+    try:
+        pid = int((path or lock_path()).read_text().strip())
     except (OSError, ValueError):
         return None
-    return pid if b"deskbench" in cmdline else None
+    return pid if _is_tray_process(pid) else None
 
 
-def poke(path: Path | None = None) -> None:
-    """Ask a running tray to refresh now instead of on its next tick."""
+def poke(path: Path | None = None) -> bool:
+    """Ask a running tray to refresh now. Never signals a process we cannot identify."""
+    if not is_held(path):
+        return False
     pid = tray_pid(path)
     if pid is None:
-        return
+        return False
     try:
         os.kill(pid, signal.SIGUSR1)
     except OSError:
-        pass
+        return False
+    return True
+
+
+def attention_dir() -> Path:
+    path = state_dir() / "attention"
+    path.mkdir(mode=0o700, exist_ok=True)
+    return path
+
+
+def attention_mark(name: str, pid: int) -> Path:
+    """Record that the process ``pid`` is waiting for a human on ``name``."""
+    marker = attention_dir() / f"{name}.{pid}"
+    marker.touch()
+    return marker
+
+
+def attention_live() -> bool:
+    """Any pending request whose asker is still alive; dead askers are pruned."""
+    live = False
+    for marker in attention_dir().iterdir():
+        try:
+            pid = int(marker.name.rsplit(".", 1)[1])
+        except (IndexError, ValueError):
+            marker.unlink(missing_ok=True)
+            continue
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            marker.unlink(missing_ok=True)
+            continue
+        except PermissionError:
+            pass
+        live = True
+    return live

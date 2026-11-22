@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import signal
 import subprocess
 import sys
@@ -16,8 +15,13 @@ ICON_FALLBACKS = ("video-display", "computer", "utilities-terminal")
 
 
 def _open(url: str) -> None:
-    subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    subprocess.Popen(
+        ["xdg-open", url],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def main() -> int:
@@ -43,19 +47,27 @@ def main() -> int:
     menu = Gtk.Menu()
     theme = Gtk.IconTheme.get_default()
     icon = next((name for name in ICON_FALLBACKS if theme.has_icon(name)), "computer")
-    indicator = AppIndicator.Indicator.new(APP_ID, icon, AppIndicator.IndicatorCategory.APPLICATION_STATUS)
+    indicator = AppIndicator.Indicator.new(
+        APP_ID, icon, AppIndicator.IndicatorCategory.APPLICATION_STATUS
+    )
     indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
     indicator.set_menu(menu)
 
     def copy(url: str) -> None:
-        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(url, -1)
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(url, -1)
+        clipboard.store()  # survive the tray exiting
 
     def stop(name: str) -> None:
-        try:
-            engine.stop(name)
-        except engine.EngineError as exc:
-            print(f"deskbench: {exc}", file=sys.stderr)
-        GLib.idle_add(refresh)
+        # Stopping takes a second or two; never block the menu on it.
+        def worker() -> None:
+            try:
+                engine.stop(name)
+            except engine.EngineError as exc:
+                print(f"deskbench: {exc}", file=sys.stderr)
+            GLib.idle_add(refresh)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def rebuild(desktops: list[engine.Desktop]) -> None:
         for child in menu.get_children():
@@ -89,22 +101,19 @@ def main() -> int:
         try:
             desktops = engine.list_desktops()
         except engine.EngineError as exc:
+            # A transient failure must not hide desktops that are still running.
             print(f"deskbench: {exc}", file=sys.stderr)
-            desktops = []
+            return False
         if not desktops:
             Gtk.main_quit()
             return False
         rebuild(desktops)
-        attention = lock.attention_path().exists()
         indicator.set_status(
             AppIndicator.IndicatorStatus.NEEDS_ATTENTION
-            if attention
+            if lock.attention_live()
             else AppIndicator.IndicatorStatus.ACTIVE
         )
         return False
-
-    def on_usr1(*_: object) -> None:
-        GLib.idle_add(refresh)
 
     def tick() -> bool:
         refresh()
@@ -112,12 +121,11 @@ def main() -> int:
 
     def watch_events(stop_event: threading.Event) -> None:
         """Re-read the desktop list whenever Podman reports a container change."""
-        exe = "podman"
         while not stop_event.is_set():
             try:
                 proc = subprocess.Popen(
-                    [exe, "events", "--filter", "type=container", "--filter", "label=deskbench=1",
-                     "--format", "json"],
+                    ["podman", "events", "--filter", "type=container",
+                     "--filter", "label=deskbench=1", "--format", "json"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                     text=True,
@@ -137,14 +145,31 @@ def main() -> int:
                 return
             time.sleep(2)  # the event stream can end; keep it alive
 
-    signal.signal(signal.SIGUSR1, on_usr1)
     stop_event = threading.Event()
     threading.Thread(target=watch_events, args=(stop_event,), daemon=True).start()
-    refresh()
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, lambda: refresh() or True)
     GLib.timeout_add_seconds(2, tick)
+
     try:
-        Gtk.main()
+        while True:
+            refresh()
+            Gtk.main()
+            handle.close()
+            # A desktop may have appeared while the tray was shutting down: its `new`
+            # would have seen our lock still held and skipped spawning.
+            try:
+                remaining = engine.list_desktops()
+            except engine.EngineError:
+                remaining = []
+            if not remaining:
+                break
+            handle = lock.acquire()
+            if handle is None:
+                break
     finally:
         stop_event.set()
-        handle.close()
+        try:
+            handle.close()
+        except OSError:
+            pass
     return 0

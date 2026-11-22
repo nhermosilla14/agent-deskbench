@@ -40,7 +40,7 @@ class Handoff(ContainerTest):
         self.assertEqual(code, 4, err)
         self.assertGreaterEqual(elapsed, 1.0)
         self.assertLess(elapsed, 10.0, "ask did not return promptly after its timeout")
-        self.assertFalse(lock.attention_path().exists(), "the attention marker was left behind")
+        self.assertFalse(lock.attention_live(), "the attention marker was left behind")
 
 
 class AskArgumentHandling(unittest.TestCase):

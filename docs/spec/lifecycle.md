@@ -13,7 +13,7 @@ is gone; the icon follows the process.
   - Stopping the last desktop ends that process, so the icon disappears with it.
   - A container that dies on its own also ends the tray, without any CLI call.
   - With no desktops, no `deskbench` process exists.
-- Tests: tests.test_lifecycle.TrayLifetime.test_2_tray_exits_when_the_last_desktop_is_stopped, tests.test_lifecycle.TrayDiesWithItsContainer.test_tray_exits_when_the_container_is_killed
+- Tests: tests.test_lifecycle.TrayLifetime.test_2_tray_exits_when_the_last_desktop_is_stopped, tests.test_lifecycle.TrayDiesWithItsContainer.test_1_tray_exits_when_the_container_is_killed, tests.test_lifecycle.TrayDiesWithItsContainer.test_2_container_stops_when_the_x_server_dies
 
 ### Single tray instance
 At most one tray runs per user session, even when several desktops are created concurrently.

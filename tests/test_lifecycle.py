@@ -134,7 +134,7 @@ class TrayDiesWithItsContainer(unittest.TestCase):
             cls.proc.terminate()
             cls.proc.wait(timeout=5)
 
-    def test_tray_exits_when_the_container_is_killed(self):
+    def test_1_tray_exits_when_the_container_is_killed(self):
         self.assertTrue(_wait_for(lock.is_held, 10), "the tray never took the lock")
         subprocess.run(["podman", "kill", f"deskbench-{self.desktop}"], check=True,
                        capture_output=True, timeout=30)
@@ -142,6 +142,22 @@ class TrayDiesWithItsContainer(unittest.TestCase):
             _wait_for(lambda: self.proc.poll() is not None, 20),
             "the tray outlived its container",
         )
+
+    def test_2_container_stops_when_the_x_server_dies(self):
+        """The entrypoint treats Xvnc as the desktop, so a dead X server ends the container."""
+        call("stop", self.desktop)
+        code, _, err = call("new", "--name", self.desktop)
+        self.assertEqual(code, 0, err)
+        subprocess.run(["podman", "exec", f"deskbench-{self.desktop}", "pkill", "Xvnc"],
+                       check=False, capture_output=True, timeout=30)
+        gone = _wait_for(
+            lambda: "running" not in subprocess.run(
+                ["podman", "ps", "--filter", f"name=deskbench-{self.desktop}", "--format", "{{.State}}"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout,
+            20,
+        )
+        self.assertTrue(gone, "the container survived the death of its X server")
 
 
 if __name__ == "__main__":

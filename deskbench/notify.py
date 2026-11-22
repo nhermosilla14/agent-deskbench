@@ -1,11 +1,13 @@
 """``ask``: notify a human, block until they say they are done.
 
 Uses the freedesktop notification service over the session bus. The tray learns about the
-request through a marker file, so the two never talk to each other directly.
+request through a per-process marker file, so the two never talk to each other directly and a
+killed asker cannot leave the tray pulsing forever.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -81,20 +83,38 @@ def ask(name: str, message: str, timeout: int = 600) -> int:
         if notification == notification_id:
             loop.quit()
 
+    def on_service_gone(_bus: object, _sender: str, _path: str, _iface: str,
+                        _signal: str, args: object) -> None:
+        changed, _old, new = args.unpack()
+        if changed == SERVICE and not new:
+            outcome["code"] = RESULT_CLOSED
+            loop.quit()
+
     def on_timeout() -> bool:
         outcome["code"] = RESULT_TIMEOUT
         loop.quit()
         return False
 
+    def on_desktop_check() -> bool:
+        try:
+            engine.get(name)
+        except engine.EngineError:
+            outcome["code"] = RESULT_CLOSED
+            loop.quit()
+            return False
+        return True
+
     bus.signal_subscribe(SERVICE, SERVICE, "ActionInvoked", OBJECT, None,
                          Gio.DBusSignalFlags.NONE, on_action)
     bus.signal_subscribe(SERVICE, SERVICE, "NotificationClosed", OBJECT, None,
                          Gio.DBusSignalFlags.NONE, on_closed)
+    bus.signal_subscribe("org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged",
+                         "/org/freedesktop/DBus", None, Gio.DBusSignalFlags.NONE, on_service_gone)
 
-    marker = lock.attention_path()
-    marker.touch()
-    GLib.timeout_add_seconds(timeout, on_timeout)
+    marker = lock.attention_mark(name, os.getpid())
     try:
+        GLib.timeout_add_seconds(timeout, on_timeout)
+        GLib.timeout_add_seconds(5, on_desktop_check)
         loop.run()
     finally:
         marker.unlink(missing_ok=True)

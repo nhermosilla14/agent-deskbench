@@ -107,7 +107,12 @@ def cmd_new(args: argparse.Namespace) -> int:
         raise EngineError(f"desktop {name!r} already exists; pick another name or stop it")
     size = sessions.validate_size(args.size)
     desktop = engine.create(name, size, args.image or engine.IMAGE)
-    _spawn_tray()
+    try:
+        _spawn_tray()
+    except OSError as exc:
+        # The desktop is running and the caller needs to hear about it, even if the tray is not.
+        print(f"{PROGRAM}: desktop started, but the tray could not be spawned: {exc}",
+              file=sys.stderr)
     print(json.dumps(desktop.as_dict()))
     print(f"{PROGRAM}: {desktop.name} is up; viewer at {desktop.url}", file=sys.stderr)
     return 0
