@@ -55,7 +55,12 @@ class SkillFile(unittest.TestCase):
         self.assertIn("do not use", description, "a skill needs negative cases too")
 
     def test_documented_verbs_match_the_parser(self):
-        documented = set(re.findall(r"^\| `([a-z]+)", SKILL.read_text(), flags=re.MULTILINE))
+        text = SKILL.read_text()
+        start = text.index("## Verbs")
+        rest = text[start:]
+        end = rest.find("\n## ", 1)
+        verbs_section = rest if end == -1 else rest[:end]
+        documented = set(re.findall(r"^\| `([a-z]+)", verbs_section, flags=re.MULTILINE))
         parser = build_parser()
         subparsers = next(
             action for action in parser._actions if hasattr(action, "choices") and action.choices

@@ -19,6 +19,17 @@ to parse prose.
   - A duplicate name fails with exit 1 and a message naming the desktop.
 - Tests: tests.test_cli.Desktops.test_new_reports_a_usable_desktop, tests.test_cli.Failures.test_invalid_name_is_rejected, tests.test_sessions.Names.test_accepts_ordinary_names, tests.test_sessions.Names.test_next_free_name_fills_the_first_gap, tests.test_sessions.Sizes.test_accepts_plausible_geometry, tests.test_cli.BindMounts.test_host_file_is_visible_inside, tests.test_cli.BindMounts.test_writes_round_trip_to_the_host, tests.test_cli.BindMounts.test_read_only_mount_refuses_writes, tests.test_sessions.Binds.test_defaults_to_mnt_and_read_write, tests.test_sessions.Binds.test_explicit_destination_and_read_only, tests.test_sessions.Binds.test_rejects_missing_source, tests.test_sessions.Binds.test_rejects_relative_destination
 
+### Choose an image flavour
+`new --flavour NAME` starts a desktop from a variant that already contains what the application
+needs; `deskbench images` reports what is available.
+- Criteria:
+  - `base` is the default and needs no flag.
+  - `deskbench images` lists every shipped flavour with a summary and whether it is built.
+  - A flavour builds on demand on top of the base image and is cached under its own tag.
+  - An unknown flavour fails with exit 1 and lists the valid names.
+  - Each shipped flavour has a Dockerfile that builds on the base tag.
+- Tests: tests.test_flavours.Registry.test_every_flavour_has_a_dockerfile, tests.test_flavours.Registry.test_derived_flavours_build_on_the_base_tag, tests.test_flavours.Registry.test_unknown_flavour_lists_the_valid_ones, tests.test_flavours.Registry.test_tags_are_distinct, tests.test_cli.Flavour.test_chromium_flavour_has_the_browser
+
 ### List desktops
 `deskbench ls` shows every running desktop and its viewer URL, in a table for humans and as JSON for
 machines.

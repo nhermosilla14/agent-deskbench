@@ -57,7 +57,8 @@ deskbench stop check
 
 | Verb | Use |
 |---|---|
-| `new [--name N] [--size WxH]` | Create a desktop; prints JSON with `name`, `url`, `id` |
+| `new [--name N] [--size WxH] [--flavour F]` | Create a desktop; prints JSON with `name`, `url`, `id` |
+| `images [--json]` | The shipped image flavours and whether they are built |
 | `ls [--json]` | What exists right now, with URLs |
 | `url NAME` | Just the viewer URL |
 | `exec NAME -- CMD...` | Run a command inside the desktop; streams output, returns its exit code |
@@ -67,6 +68,31 @@ deskbench stop check
 | `ask NAME MESSAGE` | Notify the human and block until they answer |
 
 Names are lowercase letters, digits and hyphens. Without `--name` you get `desk1`, `desk2`, and so on.
+
+## Choosing a desktop image
+
+`new` starts from a named flavour. Ask what is available:
+
+```sh
+deskbench images
+```
+
+| Flavour | Pick it when |
+|---|---|
+| `base` (default) | You will install your own packages, or the app is a binary you mount in. Nothing preinstalled means nothing to second-guess |
+| `firefox` | The thing under test is a web UI, or you need a browser to log in, read docs or drive a site |
+| `chromium` | Same, but the page expects Blink behaviour or you want devtools |
+
+Rules of thumb:
+
+- Use a browser flavour instead of installing a browser yourself. The base image is bare on purpose,
+  so `apt-get install firefox-esr` costs a network round trip *every* session.
+- Stay on `base` when you are going to install packages anyway, or when the app is native. A flavour
+  costs one build the first time; installing by hand costs minutes every time.
+- Launch Chromium through `chromium-desk`, which adds `--no-sandbox`. Plain `chromium` refuses to
+  start as root, which is what you are inside the container. Chromium then shows a yellow bar
+  warning about the unsupported `--no-sandbox` flag; that is expected here, not a defect in the app.
+- The image is fixed when the container starts; choose before you install anything you care about.
 
 ## Your project inside the desktop
 

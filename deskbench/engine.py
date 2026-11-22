@@ -17,9 +17,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import sessions
+from . import flavours, sessions
 
-IMAGE = os.environ.get("DESKBENCH_IMAGE", "localhost/agent-deskbench/desktop:1")
+IMAGE = os.environ.get("DESKBENCH_IMAGE", flavours.base_tag())
 IMAGE_CONTEXT = Path(__file__).resolve().parent.parent / "image"
 SHOT_PATH_TEMPLATE = "/tmp/deskbench-shot-{unique}.png"
 
@@ -117,6 +117,24 @@ def ensure_image(image: str = IMAGE) -> None:
         raise EngineError(f"no image {image!r} and no Dockerfile at {IMAGE_CONTEXT}")
     print(f"deskbench: building {image} (first run only) ...", file=sys.stderr, flush=True)
     _podman(["build", "-t", image, str(IMAGE_CONTEXT)], capture=False)
+
+
+def ensure_flavour(name: str) -> str:
+    """Return the tag for ``name``, building the base and the flavour when needed."""
+    flavour = flavours.get(name)
+    tag = flavours.tag_for(name)
+    if image_exists(tag):
+        return tag
+    if not flavour.dockerfile.is_file():
+        raise EngineError(f"flavour {name!r} has no Dockerfile at {flavour.dockerfile}")
+    if flavour.base and flavour.base != tag and not image_exists(flavour.base):
+        ensure_image(flavour.base)
+    print(f"deskbench: building {tag} ...", file=sys.stderr, flush=True)
+    _podman(
+        ["build", "--build-arg", f"BASE={flavour.base}", "-t", tag, str(flavour.dockerfile.parent)],
+        capture=False,
+    )
+    return tag
 
 
 def create(

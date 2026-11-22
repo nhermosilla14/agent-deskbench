@@ -189,6 +189,37 @@ class BindMounts(unittest.TestCase):
         self.assertFalse(Path(self.work, "nope").exists())
 
 
+class Flavour(unittest.TestCase):
+    """A flavour has to be usable, not just declared. Builds are expensive, so this is opt-in."""
+
+    desktop = "e2e-flavour"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        reason = e2e_skip_reason()
+        if reason:
+            raise unittest.SkipTest(reason)
+        if os.environ.get("DESKBENCH_E2E_FLAVOURS") != "1":
+            raise unittest.SkipTest("set DESKBENCH_E2E_FLAVOURS=1 to build and run an image flavour")
+        call("stop", cls.desktop)
+        code, _, err = call("new", "--name", cls.desktop, "--flavour", "chromium")
+        if code != 0:
+            raise unittest.SkipTest(f"could not start the chromium flavour: {err.strip()}")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        call("stop", cls.desktop)
+
+    def test_chromium_flavour_has_the_browser(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "deskbench", "exec", self.desktop, "--",
+             "chromium-desk", "--version"],
+            cwd=PACKAGE_ROOT, capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Chromium", result.stdout)
+
+
 class Failures(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

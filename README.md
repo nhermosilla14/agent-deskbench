@@ -34,7 +34,7 @@ browser, or click the tray icon and choose *Open viewer*.
 ## Usage
 
 ```
-deskbench new [--name NAME] [--size WxH] [--bind SRC[:DST][:ro]]   start a desktop, print {name, url, id}
+deskbench new [--name NAME] [--size WxH] [--flavour F] [--bind SRC[:DST][:ro]]   start a desktop
 deskbench ls [--json]                      list desktops
 deskbench url NAME                         print the viewer URL
 deskbench exec NAME -- CMD...              run a command inside the desktop
@@ -43,6 +43,25 @@ deskbench logs NAME [-n N]                 last N lines of the desktop's log
 deskbench stop NAME                        stop one desktop
 deskbench ask NAME [-t SECONDS] MESSAGE    notify the human and block until they are done
 ```
+
+### Image flavours
+
+`new --flavour NAME` starts from a variant that already carries what your application needs:
+
+```
+base      Bare Debian with X, openbox and the viewer (default)
+firefox   base + Firefox ESR
+chromium  base + Chromium, with a chromium-desk wrapper that adds --no-sandbox
+```
+
+```sh
+deskbench images                          # what exists, and whether it is built
+deskbench new --name web --flavour chromium
+```
+
+Flavours build on demand on top of `base` and are cached under their own tag
+(`localhost/agent-deskbench/desktop-<flavour>:1`). Adding one is a directory in
+`image/flavours/<name>/` with a `Dockerfile` and an entry in `deskbench/flavours.py`.
 
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 

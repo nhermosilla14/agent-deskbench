@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import engine, lock, sessions
+from . import engine, flavours, lock, sessions
 from .engine import EngineError
 
 PROGRAM = "deskbench"
@@ -72,9 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--name", help="desktop name (default: first free deskN)")
     new.add_argument("--size", default=sessions.DEFAULT_SIZE, help="screen geometry, WxH")
     new.add_argument("--image", help=f"override the container image (default {engine.IMAGE})")
+    new.add_argument("--flavour", default="base", metavar="NAME",
+                     help=f"image variant: {', '.join(flavours.names())} (default base)")
     new.add_argument("--bind", action="append", default=[], metavar="SRC[:DST][:ro]",
                      help="make a host path visible inside the desktop (repeatable)")
     new.set_defaults(handler=cmd_new)
+
+    images = subparsers.add_parser("images", help="list the shipped image flavours")
+    images.add_argument("--json", action="store_true", help="machine-readable output")
+    images.set_defaults(handler=cmd_images)
 
     listing = subparsers.add_parser("ls", help="list desktops")
     listing.add_argument("--json", action="store_true", help="machine-readable output")
@@ -152,7 +158,8 @@ def cmd_new(args: argparse.Namespace) -> int:
         raise EngineError(f"desktop {name!r} already exists; pick another name or stop it")
     size = sessions.validate_size(args.size)
     binds = [sessions.parse_bind(value) for value in args.bind]
-    desktop = engine.create(name, size, args.image or engine.IMAGE, binds)
+    image = args.image or engine.ensure_flavour(args.flavour)
+    desktop = engine.create(name, size, image, binds)
     try:
         _spawn_tray()
     except OSError as exc:
@@ -175,6 +182,27 @@ def cmd_ls(args: argparse.Namespace) -> int:
     width = max(len(desktop.name) for desktop in desktops)
     for desktop in desktops:
         print(f"{desktop.name:<{width}}  {desktop.state:<8}  {desktop.url}")
+    return 0
+
+
+def cmd_images(args: argparse.Namespace) -> int:
+    rows = []
+    for name in flavours.names():
+        flavour = flavours.get(name)
+        tag = flavours.tag_for(name)
+        rows.append({
+            "name": name,
+            "tag": tag,
+            "built": engine.image_exists(tag),
+            "summary": flavour.summary,
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    width = max(len(row["name"]) for row in rows)
+    for row in rows:
+        state = "built" if row["built"] else "-"
+        print(f"{row['name']:<{width}}  {state:<6}  {row['summary']}")
     return 0
 
 
@@ -238,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         _use_gi_interpreter(arguments)  # may replace this process
     try:
         return args.handler(args)
-    except (EngineError, sessions.SessionError) as exc:
+    except (EngineError, sessions.SessionError, flavours.UnknownFlavour) as exc:
         print(f"{PROGRAM}: {exc}", file=sys.stderr)
         return 1
 
