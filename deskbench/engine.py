@@ -152,11 +152,16 @@ def exec_in(name: str, command: list[str]) -> int:
     return proc.returncode
 
 
-def shot(name: str, destination: Path) -> Path:
+def shot(name: str, destination: Path, settle_ms: int = 250) -> Path:
+    """Capture the desktop, waiting for a mapped window and a still frame.
+
+    ``settle_ms`` is how long the screen must stay unchanged; the total wait is bounded inside
+    the container so an animation cannot hang the caller.
+    """
     container = get(name).container
     unique = f"{os.getpid()}-{int(time.time() * 1000)}"
     remote = SHOT_PATH_TEMPLATE.format(unique=unique)
-    _podman(["exec", container, "scrot", "-o", remote])
+    _podman(["exec", container, "deskbench-capture", remote, str(settle_ms)])
     destination.parent.mkdir(parents=True, exist_ok=True)
     _podman(["cp", f"{container}:{remote}", str(destination)])
     return destination

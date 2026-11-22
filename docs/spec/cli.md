@@ -43,12 +43,16 @@ propagating the exit code.
 - Tests: tests.test_cli.AgentSurface.test_exec_propagates_output_and_exit_code, tests.test_cli.AgentSurface.test_exec_propagates_failure
 
 ### Capture the screen
-`deskbench shot` writes a PNG of the current screen and prints the path.
+`deskbench shot` writes a PNG of the screen as a human would see it, waiting long enough for the
+picture to be worth taking.
 - Criteria:
   - `-o PATH` writes exactly there; without it a temp file is used and printed.
   - The file is a valid PNG.
+  - A capture issued immediately after launching a window shows that window.
+  - `--settle MS` controls how long the screen must stay unchanged.
+  - A desktop with no windows returns an image instead of waiting indefinitely.
   - A blank screen produces a blank image rather than an error.
-- Tests: tests.test_cli.AgentSurface.test_shot_writes_a_png
+- Tests: tests.test_cli.Capture.test_immediate_shot_after_launch_shows_the_window, tests.test_cli.Capture.test_shot_still_returns_when_nothing_is_drawn, tests.test_cli.AgentSurface.test_shot_writes_a_png
 
 ### Read the log
 `deskbench logs` prints the tail of the container log.

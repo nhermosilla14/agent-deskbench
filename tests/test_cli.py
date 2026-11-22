@@ -11,7 +11,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from support import ContainerTest, call, e2e_skip_reason
+from support import ContainerTest, call, e2e_skip_reason, png_colour_count
 
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,6 +49,49 @@ class Desktops(ContainerTest):
         code, out, _ = call("url", self.desktop)
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), self.created["url"])
+
+
+class Capture(unittest.TestCase):
+    """A shot must show what a human would see, without the caller guessing at sleeps."""
+
+    desktop = "e2e-frame"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        reason = e2e_skip_reason()
+        if reason:
+            raise unittest.SkipTest(reason)
+        call("stop", cls.desktop)
+        code, _, err = call("new", "--name", cls.desktop, "--size", "1024x768")
+        if code != 0:
+            raise unittest.SkipTest(f"could not start {cls.desktop}: {err.strip()}")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        call("stop", cls.desktop)
+
+    def shoot(self, *extra: str) -> str:
+        destination = f"/tmp/deskbench-frame-{os.getpid()}.png"
+        self.addCleanup(lambda: os.path.exists(destination) and os.unlink(destination))
+        code, out, err = call("shot", self.desktop, "-o", destination, *extra)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), destination)
+        return destination
+
+    def test_immediate_shot_after_launch_shows_the_window(self):
+        # No sleep on purpose: this is the race the tool exists to absorb.
+        call("exec", self.desktop, "--", "sh", "-c", "xterm -geometry 40x10+20+20 &")
+        destination = self.shoot()
+        self.assertGreater(png_colour_count(destination), 1,
+                           "the capture came back blank; the window was not waited for")
+
+    def test_shot_still_returns_when_nothing_is_drawn(self):
+        # The window is closed, so the desktop is uniform; the call must still answer.
+        call("exec", self.desktop, "--", "pkill", "xterm")
+        destination = self.shoot()
+        with open(destination, "rb") as handle:
+            self.assertEqual(handle.read(8), b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(png_colour_count(destination), 1)
 
 
 class AgentSurface(ContainerTest):

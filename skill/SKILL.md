@@ -35,14 +35,17 @@ deskbench new --name check --size 1280x800
 # {"name": "check", "url": "http://127.0.0.1:41234/vnc.html?...", "id": "..."}
 
 deskbench exec check -- ./my-app --some-flag     # start the thing under test
-sleep 3                                          # let it draw; the first frame can be slow
 deskbench logs check                             # cheap: did it crash?
 deskbench shot check -o /tmp/check.png           # then open the PNG to actually see it
 ```
 
-`shot` only writes a file — you learn nothing until you look at it. Prefer `logs` first: a stack trace
-is cheaper and faster than a screenshot. If the PNG comes back black, wait two seconds and shoot
-again; only then suspect the app.
+`shot` waits for the window to appear and the screen to stop changing, so you do not need to sleep
+first: shoot straight after launching. It costs about a second when something is drawn and about
+three seconds on an empty desktop, because it has to give up waiting.
+
+`shot` only writes a file — you learn nothing until you look at it. Prefer `logs` first: a stack
+trace is cheaper and faster than a screenshot. If the PNG is black, nothing was ever painted: the
+application died or never mapped a window.
 
 Iterate by re-running `exec` (or restarting the app), then `shot` again. Stop when finished:
 
@@ -85,10 +88,9 @@ screen has changed underneath you.
 - **There is no GPU.** Rendering is software (`llvmpipe`). Fine for widgets, forms and text; expect
   slow or missing WebGL, video and animations. An odd-looking blur or shader may be the bench, not a
   bug in the app.
-- **A black screenshot right after `exec` usually means the app has not drawn yet.** The first frame
-  can take a couple of seconds while the window manager maps the window; shoot again before
-  concluding anything. If it stays black, the app died or never mapped a window: check `logs` and that
-  you launched it inside the desktop.
+- **A black screenshot means nothing was painted.** `shot` already waited for a window to appear and
+  for the screen to settle, so a uniform image means the application died or never mapped a window:
+  check `logs` and that you launched it inside the desktop.
 - **`stop` destroys everything.** The container is `--rm`, so files, installed packages and app state
   vanish. Do not stop until you have what you need.
 - **The image is a bare Debian plus X tooling**, not your project. Install missing packages with

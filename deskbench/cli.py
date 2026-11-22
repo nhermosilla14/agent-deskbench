@@ -51,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     shot = subparsers.add_parser("shot", help="capture the desktop to a PNG")
     shot.add_argument("name")
     shot.add_argument("-o", "--output", help="destination path (default: a temp file)")
+    shot.add_argument("--settle", type=int, default=250,
+                      metavar="MS", help="how long the screen must stay still (default 250)")
     shot.set_defaults(handler=cmd_shot)
 
     logs = subparsers.add_parser("logs", help="print the desktop's log")
@@ -156,7 +158,7 @@ def cmd_shot(args: argparse.Namespace) -> int:
         handle, path = tempfile.mkstemp(prefix=f"deskbench-{args.name}-", suffix=".png")
         os.close(handle)
         destination = Path(path)
-    engine.shot(args.name, destination)
+    engine.shot(args.name, destination, args.settle)
     print(destination)
     return 0
 

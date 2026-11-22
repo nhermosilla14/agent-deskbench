@@ -21,8 +21,11 @@ RUN apt-get update \
       ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+RUN fc-cache -f >/dev/null 2>&1 || true
+
 COPY entrypoint.sh /usr/local/bin/deskbench-entrypoint
-RUN chmod +x /usr/local/bin/deskbench-entrypoint
+COPY capture.sh /usr/local/bin/deskbench-capture
+RUN chmod +x /usr/local/bin/deskbench-entrypoint /usr/local/bin/deskbench-capture
 
 EXPOSE 6080
 

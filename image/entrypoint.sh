@@ -33,6 +33,19 @@ done
 # Window manager: focus, dialogs and decorations.
 openbox &
 
+# The first X client in a fresh container pays a one-off cost (client initialisation, font
+# caches) and can take seconds to paint. Pay it here, once, so the first real screenshot is not
+# a race against the agent.
+xclock -geometry 1x1+0+0 >/dev/null 2>&1 &
+warmup=$!
+sleep 1.5
+kill "$warmup" 2>/dev/null || true
+sleep 0.3
+
+# Reference frame for "nothing has been painted yet". Captured with an empty desktop, so a later
+# capture can tell an undrawn window from a genuinely empty one.
+xwd -root -silent 2>/dev/null | md5sum | cut -d' ' -f1 > /run/deskbench-blank.md5 || true
+
 # noVNC + WebSocket bridge on the single published port.
 websockify --web=/usr/share/novnc 0.0.0.0:6080 127.0.0.1:5901 &
 
