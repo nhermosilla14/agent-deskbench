@@ -12,6 +12,7 @@ RUN apt-get update \
       python3-websockify \
       dbus-x11 \
       xterm \
+      x11-apps \
       xfonts-base \
       x11-utils \
       scrot \
