@@ -9,7 +9,7 @@ import sys
 import time
 import unittest
 
-from deskbench import lock
+from deskbench import engine, lock
 
 from support import call, e2e_skip_reason
 
@@ -49,6 +49,8 @@ class TrayLifetime(unittest.TestCase):
         reason = _tray_skip_reason()
         if reason:
             raise unittest.SkipTest(reason)
+        if len(engine.list_desktops()) > 0:
+            raise unittest.SkipTest("other desktops are running; the tray would have nothing to exit for")
         call("stop", cls.desktop)
         code, out, err = call("new", "--name", cls.desktop)
         if code != 0:
@@ -114,6 +116,8 @@ class TrayDiesWithItsContainer(unittest.TestCase):
         reason = _tray_skip_reason()
         if reason:
             raise unittest.SkipTest(reason)
+        if len(engine.list_desktops()) > 0:
+            raise unittest.SkipTest("other desktops are running; this test needs the only one")
         call("stop", cls.desktop)
         code, _, err = call("new", "--name", cls.desktop)
         if code != 0:

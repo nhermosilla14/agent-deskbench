@@ -16,9 +16,48 @@ from .engine import EngineError
 PROGRAM = "deskbench"
 VERSION = "0.1.0"
 
+# Verbs that need PyGObject (GTK, AppIndicator, the notification service).
+GUI_VERBS = {"tray", "ask"}
+
+SYSTEM_PYTHONS = ("/usr/bin/python3", "/usr/local/bin/python3")
+
 ASK_DONE = 0
 ASK_TIMEOUT = 4
 ASK_CLOSED = 5
+
+
+def _gi_available() -> bool:
+    try:
+        import gi  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _system_python() -> str | None:
+    for candidate in SYSTEM_PYTHONS:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _use_gi_interpreter(arguments: list[str]) -> None:
+    """Re-exec a GUI verb under an interpreter that can import PyGObject.
+
+    PyGObject is a system package and cannot be installed into a virtualenv casually, so a console
+    script living in an isolated environment (uv tool, pipx) has no ``gi``. Rather than failing with
+    "No module named 'gi'", hand the verb to the system interpreter, which does.
+    """
+    if _gi_available():
+        return
+    python = _system_python()
+    if python is None:
+        return
+    package_root = str(Path(__file__).resolve().parent.parent)
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = package_root + (os.pathsep + existing if existing else "")
+    os.execve(python, [python, "-m", PROGRAM, *arguments], env)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,7 +121,8 @@ def _spawn_tray() -> None:
     """Start the tray unless one is already alive.
 
     ``DESKBENCH_NO_TRAY=1`` suppresses it, which is how the test suite keeps a GUI out of
-    headless runs.
+    headless runs. The child's output goes to a log next to the lock: a tray that dies on
+    start-up must not be invisible.
     """
     if os.environ.get("DESKBENCH_NO_TRAY") == "1":
         return
@@ -92,16 +132,17 @@ def _spawn_tray() -> None:
     env = dict(os.environ)
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = str(package_root) + (os.pathsep + existing if existing else "")
-    subprocess.Popen(
-        [sys.executable, "-m", PROGRAM, "tray"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        cwd=str(package_root),
-        env=env,
-        start_new_session=True,
-        close_fds=True,
-    )
+    with open(lock.state_dir() / "tray.log", "ab", buffering=0) as log:
+        subprocess.Popen(
+            [sys.executable, "-m", PROGRAM, "tray"],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            cwd=str(package_root),
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+        )
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -191,7 +232,10 @@ def cmd_tray(_: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    args = build_parser().parse_args(arguments)
+    if args.verb in GUI_VERBS:
+        _use_gi_interpreter(arguments)  # may replace this process
     try:
         return args.handler(args)
     except (EngineError, sessions.SessionError) as exc:

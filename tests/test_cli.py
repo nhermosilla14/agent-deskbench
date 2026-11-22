@@ -89,8 +89,15 @@ class Capture(unittest.TestCase):
                            "the capture came back blank; the window was not waited for")
 
     def test_shot_still_returns_when_nothing_is_drawn(self):
-        # The window is closed, so the desktop is uniform; the call must still answer.
+        # Close the window and wait for the window manager to drop it, otherwise the capture
+        # legitimately still contains it.
         call("exec", self.desktop, "--", "pkill", "xterm")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            _, clients, _ = call("exec", self.desktop, "--", "xprop", "-root", "_NET_CLIENT_LIST")
+            if "0x" not in clients:
+                break
+            time.sleep(0.3)
         destination = self.shoot()
         with open(destination, "rb") as handle:
             self.assertEqual(handle.read(8), b"\x89PNG\r\n\x1a\n")

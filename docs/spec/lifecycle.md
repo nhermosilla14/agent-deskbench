@@ -16,12 +16,15 @@ is gone; the icon follows the process.
 - Tests: tests.test_lifecycle.TrayLifetime.test_2_tray_exits_when_the_last_desktop_is_stopped, tests.test_lifecycle.TrayDiesWithItsContainer.test_1_tray_exits_when_the_container_is_killed, tests.test_lifecycle.TrayDiesWithItsContainer.test_2_container_stops_when_the_x_server_dies
 
 ### Single tray instance
-At most one tray runs per user session, even when several desktops are created concurrently.
+At most one tray runs per user session, even when several desktops are created concurrently, and it
+works when started from the installed command rather than a checkout.
 - Criteria:
   - A second `deskbench tray` exits 0 immediately instead of drawing a second icon.
-  - The first one keeps its menu.
+  - The first one keeps its menu and keeps running while any desktop exists.
   - The lock that proves liveness is released when the process ends.
-- Tests: tests.test_lifecycle.TrayLifetime.test_1_a_second_tray_refuses_to_start
+  - Starting the tray through the installed console script works even when that script lives in an
+    isolated environment without PyGObject.
+- Tests: tests.test_lifecycle.TrayLifetime.test_1_a_second_tray_refuses_to_start, tests.test_distribution.InstalledEntryPoint.test_installed_command_can_run_the_tray
 
 ## Not supported
 
