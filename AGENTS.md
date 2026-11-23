@@ -38,8 +38,8 @@ list is the entry point, not a second copy.
   tests, Taskfile for task automation, Podman for containers, ShellCheck-clean POSIX shell for the
   image entrypoint. `python3 -m compileall` is the syntax gate.
 - Git workflow: trunk-based. Integration branch: `main`. Short-lived `feat/<slug>` or `fix/<slug>`
-  branches created from an up-to-date `main`; merge back to `main` when finalized. The repository is
-  local-only for now; nothing is pushed anywhere.
+  branches created from an up-to-date `main`; merge back to `main` when finalized. Remote: `origin`
+  on GitHub (`nhermosilla14/agent-deskbench`); push `main` when a branch is finalized.
 - Workflow: branch names as above; commits `type: imperative summary` (feat, fix, docs, test,
   chore); each slice lands as its own commit once its end-to-end test passes.
 - Style: PEP 8, 4-space indents, `from __future__ import annotations`, type hints on public

@@ -24,7 +24,7 @@ sudo apt install podman python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.
 ## Getting started
 
 ```sh
-git clone <this repo> agent-deskbench
+git clone git@github.com:nhermosilla14/agent-deskbench.git
 cd agent-deskbench
 task image          # build the container image locally
 python3 -m deskbench new --name alpha --size 1600x1000
