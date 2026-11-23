@@ -122,4 +122,7 @@ slices, one slice at a time, each with an end-to-end test through the CLI.
 
 ## License
 
-Not decided yet.
+GPL-3.0-or-later. See [`LICENSE`](LICENSE).
+
+If you would rather pin the licence to version 3 only, change this line and the SPDX identifier to
+`GPL-3.0-only`; the licence text in `LICENSE` is the same either way.
