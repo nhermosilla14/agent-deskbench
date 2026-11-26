@@ -18,10 +18,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import flavours, runtime as runtimes, sessions
+from . import runtime as runtimes, sessions
 
-IMAGE = os.environ.get("DESKBENCH_IMAGE", flavours.base_tag())
-IMAGE_CONTEXT = Path(__file__).resolve().parent.parent / "image"
 SHOT_PATH_TEMPLATE = "/tmp/deskbench-shot-{unique}.png"
 
 
@@ -94,38 +92,32 @@ def get(name: str) -> Desktop:
     raise EngineError(f"no desktop named {name!r}; run `deskbench ls` to see what exists")
 
 
-def image_exists(image: str = IMAGE) -> bool:
+def image_exists(image: str) -> bool:
     runtime = runtimes.detect()
     return _podman(runtimes.image_exists_args(runtime, image), check=False).returncode == 0
 
 
-def ensure_image(image: str = IMAGE) -> None:
-    if image_exists(image):
+def ensure_image(image: str, policy: str = "missing") -> None:
+    """Make ``image`` locally available according to ``policy``.
+
+    ``missing`` (the default) pulls only when the image is absent, ``always`` refreshes it, and
+    ``never`` refuses to pull. Pull progress goes to stderr so stdout stays machine-readable.
+    """
+    if policy not in ("missing", "always", "never"):
+        raise ValueError(f"unknown pull policy {policy!r}; use missing, always or never")
+
+    present = image_exists(image)
+    if policy == "never":
+        if not present:
+            raise EngineError(
+                f"image {image!r} is not present and --pull=never forbids pulling"
+            )
         return
-    if image != IMAGE:
-        raise EngineError(f"image {image!r} is not present; build or pull it first")
-    if not (IMAGE_CONTEXT / "Dockerfile").is_file():
-        raise EngineError(f"no image {image!r} and no Dockerfile at {IMAGE_CONTEXT}")
-    print(f"deskbench: building {image} (first run only) ...", file=sys.stderr, flush=True)
-    _podman(["build", "-t", image, str(IMAGE_CONTEXT)], capture=False)
+    if policy == "missing" and present:
+        return
 
-
-def ensure_flavour(name: str) -> str:
-    """Return the tag for ``name``, building the base and the flavour when needed."""
-    flavour = flavours.get(name)
-    tag = flavours.tag_for(name)
-    if image_exists(tag):
-        return tag
-    if not flavour.dockerfile.is_file():
-        raise EngineError(f"flavour {name!r} has no Dockerfile at {flavour.dockerfile}")
-    if flavour.base and flavour.base != tag and not image_exists(flavour.base):
-        ensure_image(flavour.base)
-    print(f"deskbench: building {tag} ...", file=sys.stderr, flush=True)
-    _podman(
-        ["build", "--build-arg", f"BASE={flavour.base}", "-t", tag, str(flavour.dockerfile.parent)],
-        capture=False,
-    )
-    return tag
+    print(f"deskbench: pulling {image} ...", file=sys.stderr, flush=True)
+    _podman(["pull", image], capture=False)
 
 
 def _viewer_answers(url: str) -> bool:
@@ -153,12 +145,13 @@ def wait_ready(desktop: Desktop, timeout: float = 30.0) -> Desktop:
 
 def create(
     name: str,
-    size: str = sessions.DEFAULT_SIZE,
-    image: str = IMAGE,
+    size: str,
+    image: str,
     binds: list[sessions.Bind] | None = None,
+    pull: str = "missing",
 ) -> Desktop:
     container = sessions.container_name(name)
-    ensure_image(image)
+    ensure_image(image, pull)
     volumes: list[str] = []
     for bind in binds or []:
         volumes.extend(["-v", bind.as_volume()])

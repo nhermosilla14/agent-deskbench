@@ -81,8 +81,15 @@ def png_colour_count(path: str | Path, max_rows: int = 400) -> int:
 
 
 def e2e_skip_reason() -> str | None:
+    """Return why a container test cannot run, or ``None`` when it can.
+
+    When the suite is enabled, point the built-in flavours at the locally built images
+    (``localhost/agent-deskbench``) unless the caller already chose a registry, so container
+    tests are hermetic and never pull from the published registry.
+    """
     if os.environ.get("DESKBENCH_E2E") != "1":
         return "set DESKBENCH_E2E=1 to run the container tests"
+    os.environ.setdefault("DESKBENCH_REGISTRY", "localhost/agent-deskbench")
     if shutil.which("podman") is None:
         return "podman is not installed"
     return None

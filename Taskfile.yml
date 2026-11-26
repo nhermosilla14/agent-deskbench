@@ -1,7 +1,10 @@
 version: "3"
 
 vars:
-  IMAGE: localhost/agent-deskbench/desktop:1
+  REGISTRY: localhost/agent-deskbench
+  IMAGE: "{{.REGISTRY}}/desktop:1"
+  FIREFOX_IMAGE: "{{.REGISTRY}}/desktop-firefox:1"
+  CHROMIUM_IMAGE: "{{.REGISTRY}}/desktop-chromium:1"
 
 tasks:
   default:
@@ -15,10 +18,10 @@ tasks:
       - python3 -m unittest discover -s tests -v
 
   e2e:
-    desc: Build the image and run the container-backed suite
+    desc: Build the three images and run the container-backed suite against them
     deps: [image]
     cmds:
-      - DESKBENCH_E2E=1 python3 -m unittest discover -s tests -v
+      - DESKBENCH_E2E=1 DESKBENCH_REGISTRY={{.REGISTRY}} python3 -m unittest discover -s tests -v
 
   lint:
     desc: Syntax check plus the branch-docs merge gate
@@ -27,9 +30,11 @@ tasks:
       - ./scripts/check-branch-docs.sh
 
   image:
-    desc: Build the desktop image locally
+    desc: Build the three built-in desktop images locally
     cmds:
       - podman build -t {{.IMAGE}} image
+      - podman build --build-arg BASE={{.IMAGE}} -t {{.FIREFOX_IMAGE}} image/flavours/firefox
+      - podman build --build-arg BASE={{.IMAGE}} -t {{.CHROMIUM_IMAGE}} image/flavours/chromium
 
   install-cli:
     desc: Install the deskbench command into ~/.local/bin (editable, via uv)
@@ -59,10 +64,10 @@ tasks:
       - cp contrib/deskbench.desktop ~/.config/autostart/
 
   clean:
-    desc: Remove every desktop container and the image
+    desc: Remove every desktop container and the three built-in images
     cmds:
       - podman ps -aq --filter label=deskbench=1 | xargs -r podman rm -f
-      - podman rmi -i {{.IMAGE}} || true
+      - podman rmi -i {{.IMAGE}} {{.FIREFOX_IMAGE}} {{.CHROMIUM_IMAGE}} || true
 
   check-docs:
     desc: Run the merge gate only

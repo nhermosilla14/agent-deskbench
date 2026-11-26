@@ -26,7 +26,7 @@ sudo apt install podman python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.
 ```sh
 git clone git@github.com:nhermosilla14/agent-deskbench.git
 cd agent-deskbench
-task image          # build the container image locally
+task image          # build the three images locally for development
 python3 -m deskbench new --name alpha --size 1600x1000
 ```
 
@@ -36,7 +36,9 @@ browser, or click the tray icon and choose *Open viewer*.
 ## Usage
 
 ```
-deskbench new [--name NAME] [--size WxH] [--flavour F] [--bind SRC[:DST][:ro]]   start a desktop
+deskbench new [--name NAME] [--size WxH] [--flavour F | --image REF] [--pull P]
+              [--bind SRC[:DST][:ro]]      start a desktop
+deskbench images [--json]                  list image flavours and local presence
 deskbench ls [--json]                      list desktops
 deskbench url NAME                         print the viewer URL
 deskbench exec NAME -- CMD...              run a command inside the desktop
@@ -48,22 +50,24 @@ deskbench ask NAME [-t SECONDS] MESSAGE    notify the human and block until they
 
 ### Image flavours
 
-`new --flavour NAME` starts from a variant that already carries what your application needs:
+`new --flavour NAME` starts from an image that already carries what your application needs:
 
 ```
 base      Bare Debian with X, openbox and the viewer (default)
 firefox   base + Firefox ESR
-chromium  base + Chromium, with a chromium-desk wrapper that adds --no-sandbox
+chromium  base + Chromium, with a chromium-desk wrapper that adds --disable-dev-shm-usage;
+          the renderer sandbox stays on
 ```
+
+The built-in references live under `ghcr.io/nhermosilla14/agent-deskbench` by default. Set
+`DESKBENCH_REGISTRY` to use a local build or a fork. `new` pulls a missing image and never builds;
+`--pull=always` refreshes it and `--pull=never` refuses to pull.
 
 ```sh
-deskbench images                          # what exists, and whether it is built
+deskbench images                          # what exists, and whether it is present locally
 deskbench new --name web --flavour chromium
+deskbench new --name custom --image registry.example.com/team/desktop:1
 ```
-
-Flavours build on demand on top of `base` and are cached under their own tag
-(`localhost/agent-deskbench/desktop-<flavour>:1`). Adding one is a directory in
-`image/flavours/<name>/` with a `Dockerfile` and an entry in `deskbench/flavours.py`.
 
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 
@@ -75,8 +79,8 @@ as they would on a workstation. `sudo` is available without a password when root
 ```
 agent-deskbench/
 ├── docs/                     vision, architecture, spec, ADRs, diagrams, branch records
-├── image/                    container image: TigerVNC + openbox + noVNC
-├── src/deskbench/            the CLI, the engine wrapper and the tray
+├── image/                    container images: TigerVNC + openbox + noVNC, plus flavour builds
+├── deskbench/                the CLI, the engine wrapper and the tray
 ├── tests/                    end-to-end tests through the CLI
 ├── scripts/                  branch-docs merge gate
 └── .agents/skills/           the vendored general-software-development skill
@@ -96,9 +100,9 @@ task install-skill   # copy skill/ to ~/.agents/skills/agent-deskbench
 
 ```sh
 task test        # python3 -m unittest discover -s tests
-task e2e         # the container-backed tests (builds the image, starts desktops)
+task e2e         # container-backed tests (builds the three images, starts desktops)
 task lint        # python3 -m compileall + branch-docs check
-task image       # rebuild the container image
+task image       # rebuild the three images
 ```
 
 Two environment variables exist for automation:
@@ -108,6 +112,7 @@ Two environment variables exist for automation:
 | `DESKBENCH_E2E=1` | Run the container-backed tests instead of skipping them |
 | `DESKBENCH_NO_TRAY=1` | Do not spawn the tray (headless test runs) |
 | `DESKBENCH_RUNTIME=podman\|docker` | Force a runtime instead of detecting one |
+| `DESKBENCH_REGISTRY=...` | Registry prefix for built-in image references (default `ghcr.io/nhermosilla14/agent-deskbench`) |
 
 `ask` exits `0` when the human pressed *I'm done*, `4` on timeout and `5` when the notification was
 dismissed without an answer.

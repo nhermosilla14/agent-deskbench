@@ -14,6 +14,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from deskbench import engine, flavours
+
 from support import ContainerTest, call, e2e_skip_reason, png_colour_count
 
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -208,7 +210,7 @@ class BindMounts(unittest.TestCase):
 
 
 class Flavour(unittest.TestCase):
-    """A flavour has to be usable, not just declared. Builds are expensive, so this is opt-in."""
+    """A flavour has to be usable, not just declared. Runs when the local image exists."""
 
     desktop = "e2e-flavour"
 
@@ -217,8 +219,11 @@ class Flavour(unittest.TestCase):
         reason = e2e_skip_reason()
         if reason:
             raise unittest.SkipTest(reason)
-        if os.environ.get("DESKBENCH_E2E_FLAVOURS") != "1":
-            raise unittest.SkipTest("set DESKBENCH_E2E_FLAVOURS=1 to build and run an image flavour")
+        image = flavours.get("chromium").image
+        if not engine.image_exists(image):
+            raise unittest.SkipTest(
+                f"local chromium image {image} is not built; run `task image`"
+            )
         call("stop", cls.desktop)
         code, _, err = call("new", "--name", cls.desktop, "--flavour", "chromium")
         if code != 0:
