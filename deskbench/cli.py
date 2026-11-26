@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--flavour",
         default=None,
         metavar="NAME",
-        help=f"built-in image flavour: {', '.join(flavours.names())} (default: base)",
+        help="built-in or user flavour (see `deskbench images`; default: base)",
     )
     image_choice.add_argument(
         "--image",
@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="make a host path visible inside the desktop (repeatable)")
     new.set_defaults(handler=cmd_new)
 
-    images = subparsers.add_parser("images", help="list the shipped image flavours")
+    images = subparsers.add_parser("images", help="list the built-in and user image flavours")
     images.add_argument("--json", action="store_true", help="machine-readable output")
     images.set_defaults(handler=cmd_images)
 
@@ -205,16 +205,19 @@ def cmd_ls(args: argparse.Namespace) -> int:
 
 
 def cmd_images(args: argparse.Namespace) -> int:
-    rows = []
-    for name in flavours.names():
-        flavour = flavours.get(name)
-        rows.append({
-            "name": name,
+    discovery = flavours.discover()
+    for problem in discovery.problems:
+        print(f"{PROGRAM}: ignoring {problem.path}: {problem.message}", file=sys.stderr)
+    rows = [
+        {
+            "name": flavour.name,
             "source": flavour.source,
             "image": flavour.image,
             "present": engine.image_exists(flavour.image),
             "summary": flavour.summary,
-        })
+        }
+        for flavour in discovery.flavours
+    ]
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -294,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         flavours.UnknownFlavour,
         flavours.InvalidImage,
         flavours.FlavourConfigError,
+        flavours.ManifestError,
     ) as exc:
         print(f"{PROGRAM}: {exc}", file=sys.stderr)
         return 1

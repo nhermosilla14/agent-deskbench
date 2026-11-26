@@ -7,7 +7,9 @@ import io
 import json
 import os
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from deskbench import engine, flavours
@@ -97,7 +99,11 @@ class ImageReferences(unittest.TestCase):
     def test_images_lists_builtin_references(self):
         code, out, err = call("images", "--json")
         self.assertEqual(code, 0, err)
-        rows = {row["name"]: row for row in json.loads(out)}
+        rows = {
+            row["name"]: row
+            for row in json.loads(out)
+            if row["source"] == "builtin"
+        }
         self.assertEqual(set(rows), set(flavours.names()))
         expected = {
             "base": f"{self.registry}/desktop:1",
@@ -123,6 +129,110 @@ class ImageReferences(unittest.TestCase):
                 self.assertIn(name, out)
                 self.assertIn(flavour.image, out)
                 self.assertIn(flavour.summary, out)
+
+
+class UserFlavours(unittest.TestCase):
+    """A flavour defined under the config directory starts like a built-in and is reported."""
+
+    desktop = "e2e-user-flavour"
+    broken = "e2e-user-broken"
+    flavour = "custom"
+    malformed = "broken"
+    summary = "User flavour for the suite"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        reason = e2e_skip_reason()
+        if reason:
+            raise unittest.SkipTest(reason)
+        cls.registry = os.environ["DESKBENCH_REGISTRY"]
+        cls.base_image = f"{cls.registry}/desktop:1"
+        if not engine.image_exists(cls.base_image):
+            raise unittest.SkipTest(
+                f"{cls.base_image} is absent; build it with `task image` first"
+            )
+
+        cls._tempdir = tempfile.TemporaryDirectory()
+        directory = Path(cls._tempdir.name)
+        (directory / cls.flavour).mkdir()
+        (directory / cls.flavour / "flavour.toml").write_text(
+            f'image = "{cls.base_image}"\nsummary = "{cls.summary}"\n',
+            encoding="utf-8",
+        )
+        (directory / cls.malformed).mkdir()
+        cls.manifest = directory / cls.malformed / "flavour.toml"
+        cls.manifest.write_text("image = \n", encoding="utf-8")
+
+        cls._env = mock.patch.dict(
+            os.environ, {"DESKBENCH_FLAVOURS_DIR": str(directory)}
+        )
+        cls._env.start()
+        try:
+            call("stop", cls.desktop)
+            code, out, err = call(
+                "new", "--name", cls.desktop, "--size", "1024x768",
+                "--flavour", cls.flavour,
+            )
+        except BaseException:
+            cls._cleanup()
+            raise
+        if code != 0:
+            cls._cleanup()
+            raise unittest.SkipTest(
+                f"could not start {cls.desktop}: {err.strip() or out.strip()}"
+            )
+        cls.created = json.loads(out)
+
+    @classmethod
+    def _cleanup(cls) -> None:
+        call("stop", cls.desktop)
+        cls._tempdir.cleanup()
+        cls._env.stop()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._cleanup()
+
+    def test_named_flavour_from_the_config_directory(self):
+        self.assertEqual(self.created["name"], self.desktop)
+        self.assertTrue(self.created["url"].startswith("http://127.0.0.1:"))
+        self.assertEqual(_container_image(self.created["id"]), self.base_image)
+
+        code, _, err = call("exec", self.desktop, "--", "true")
+        self.assertEqual(code, 0, err)
+
+        code, out, err = call("images", "--json")
+        self.assertEqual(code, 0, err)
+        rows = {row["name"]: row for row in json.loads(out)}
+        self.assertIn(self.flavour, rows)
+        self.assertEqual(rows[self.flavour]["source"], "user")
+        self.assertEqual(rows[self.flavour]["image"], self.base_image)
+        self.assertTrue(rows[self.flavour]["present"])
+        self.assertEqual(rows[self.flavour]["summary"], self.summary)
+
+    def test_malformed_manifest_warns_without_hiding_valid_flavours(self):
+        code, out, err = call("images", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertIn(f"deskbench: ignoring {self.manifest}", err)
+        self.assertIn("invalid TOML", err)
+        rows = {row["name"]: row for row in json.loads(out)}
+        self.assertIn(self.flavour, rows)
+        self.assertNotIn(self.malformed, rows)
+
+    def test_new_fails_for_a_malformed_manifest(self):
+        code, out, err = call(
+            "new", "--name", self.broken, "--flavour", self.malformed,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "", "a failed new must not print a desktop JSON")
+        self.assertIn(str(self.manifest), err)
+        result = subprocess.run(
+            ["podman", "container", "exists", f"deskbench-{self.broken}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(result.returncode, 0, "a container was created for a bad manifest")
 
 
 class Arguments(unittest.TestCase):

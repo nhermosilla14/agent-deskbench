@@ -39,13 +39,19 @@ The built-in flavours are OCI image references (`base`, `firefox`, `chromium`) u
 pulls a missing reference and never builds. `image/` and `image/flavours/*` are the build inputs for
 `task image` and the publishing pipeline, not a runtime dependency.
 
+User flavours live in `$XDG_CONFIG_HOME/agent-deskbench/flavours/<name>/flavour.toml` (default
+`~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference
+and an optional summary; `flavours.discover()` merges valid manifests with the built-ins for
+`images`, reporting bad candidates as problems, and `get()` resolves a user name at `new` time. A
+directory that shadows a built-in is an error.
+
 ## Module map
 
 | Module | Role |
 |---|---|
 | `deskbench.cli` | argument parsing and the verb implementations |
 | `deskbench.engine` | the only module that talks to Podman |
-| `deskbench.flavours` | built-in image references, registry override and reference validation |
+| `deskbench.flavours` | built-in and user flavour discovery, manifests, registry override and reference validation |
 | `deskbench.sessions` | naming, URL derivation, size parsing |
 | `deskbench.lock` | tray singleton and liveness via a lifetime-held flock |
 | `deskbench.tray` | GTK/AppIndicator icon, menu, event loop, flock |

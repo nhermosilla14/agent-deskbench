@@ -69,6 +69,23 @@ deskbench new --name web --flavour chromium
 deskbench new --name custom --image registry.example.com/team/desktop:1
 ```
 
+#### Adding a flavour
+
+Create a directory under the user config directory whose name is the flavour name, and give it a
+`flavour.toml` that names the image:
+
+```toml
+# ~/.config/agent-deskbench/flavours/web/flavour.toml
+image = "registry.example.com/team/web:1"   # required, fully qualified, tagged or digest
+summary = "Our web app image"                # optional
+```
+
+`deskbench images` lists it with source `user`, and `deskbench new --flavour web` starts it with the
+same pull policy. `DESKBENCH_FLAVOURS_DIR` overrides the directory (otherwise `$XDG_CONFIG_HOME/agent-deskbench/flavours`,
+then `~/.config/agent-deskbench/flavours`). A name is 1–31 lowercase letters, digits or hyphens and
+may not shadow a built-in. A malformed manifest is reported on stderr by `images` and fails `new`
+with the path; a directory without `flavour.toml` is ignored.
+
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 
 Everything inside a desktop runs as the unprivileged user `agent`, not root, so applications behave
@@ -113,6 +130,7 @@ Two environment variables exist for automation:
 | `DESKBENCH_NO_TRAY=1` | Do not spawn the tray (headless test runs) |
 | `DESKBENCH_RUNTIME=podman\|docker` | Force a runtime instead of detecting one |
 | `DESKBENCH_REGISTRY=...` | Registry prefix for built-in image references (default `ghcr.io/nhermosilla14/agent-deskbench`) |
+| `DESKBENCH_FLAVOURS_DIR=...` | Directory searched for user flavour manifests (default `$XDG_CONFIG_HOME/agent-deskbench/flavours`) |
 
 `ask` exits `0` when the human pressed *I'm done*, `4` on timeout and `5` when the notification was
 dismissed without an answer.

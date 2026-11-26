@@ -1,5 +1,6 @@
 # User flavour discovery
 
+- Status: Done
 - Intents: 20261126-discover-user-flavours
 - ADRs: 20261126-flavours-are-oci-image-references
 - Depends on: 01

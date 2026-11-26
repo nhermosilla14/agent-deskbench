@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import io
 import json
 import os
 import shutil
+import tempfile
 import unittest
 import zlib
 from pathlib import Path
 
 from deskbench import cli
+
+_EMPTY_FLAVOURS: str | None = None
+
+
+def _empty_flavours_dir() -> str:
+    """A persistent empty directory, so container tests ignore the developer's flavours."""
+    global _EMPTY_FLAVOURS
+    if _EMPTY_FLAVOURS is None:
+        _EMPTY_FLAVOURS = tempfile.mkdtemp(prefix="deskbench-e2e-flavours-")
+        atexit.register(shutil.rmtree, _EMPTY_FLAVOURS, True)
+    return _EMPTY_FLAVOURS
 
 
 def png_colour_count(path: str | Path, max_rows: int = 400) -> int:
@@ -90,6 +103,7 @@ def e2e_skip_reason() -> str | None:
     if os.environ.get("DESKBENCH_E2E") != "1":
         return "set DESKBENCH_E2E=1 to run the container tests"
     os.environ.setdefault("DESKBENCH_REGISTRY", "localhost/agent-deskbench")
+    os.environ.setdefault("DESKBENCH_FLAVOURS_DIR", _empty_flavours_dir())
     if shutil.which("podman") is None:
         return "podman is not installed"
     return None
