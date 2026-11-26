@@ -1,6 +1,7 @@
 version: "3"
 
 vars:
+  REGISTRY: ""
   LOCAL_REGISTRY: localhost/agent-deskbench
   IMAGE: "{{.LOCAL_REGISTRY}}/desktop:1"
   FIREFOX_IMAGE: "{{.LOCAL_REGISTRY}}/desktop-firefox:1"
