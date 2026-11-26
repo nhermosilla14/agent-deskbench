@@ -175,10 +175,10 @@ def cmd_new(args: argparse.Namespace) -> int:
     size = sessions.validate_size(args.size)
     binds = [sessions.parse_bind(value) for value in args.bind]
     if args.image:
-        image = flavours.validate_image_ref(args.image)
+        flavour = flavours.adhoc(args.image)
     else:
-        image = flavours.get(args.flavour or "base").image
-    desktop = engine.create(name, size, image, binds, args.pull)
+        flavour = flavours.get(args.flavour or "base")
+    desktop = engine.create(name, size, flavour, binds, args.pull)
     try:
         _spawn_tray()
     except OSError as exc:

@@ -86,10 +86,36 @@ then `~/.config/agent-deskbench/flavours`). A name is 1–31 lowercase letters, 
 may not shadow a built-in. A malformed manifest is reported on stderr by `images` and fails `new`
 with the path; a directory without `flavour.toml` is ignored.
 
+A manifest may also describe how the image presents its desktop. Both tables are optional; the
+defaults reproduce the built-in image.
+
+```toml
+[viewer]                    # where the browser viewer lives inside the container
+port = 6080                 # published on 127.0.0.1
+path = "/vnc.html?autoconnect=1&resize=scale"
+scheme = "http"             # or "https"
+timeout = 30                # seconds `new` waits for the viewer to answer
+
+[run]                       # how the desktop process starts, as uid:gid
+user = "1000:1000"
+entrypoint = ["/usr/local/bin/my-entrypoint"]
+command = ["--flag"]
+env = { MY_SIZE = "{width}x{height}" }   # {width}/{height} come from --size
+```
+
+`new` publishes the configured viewer port, waits for that scheme and path (2xx, 3xx, 401 or 403),
+and records the effective port, path, scheme and user as container labels, so `ls`, `url` and `exec`
+keep the configuration the desktop started with even if the manifest changes later. `exec` runs as
+the configured user. `new` refuses an image whose `sh` cannot run a command and removes the
+container. Unknown keys and out-of-range values are errors, so a typo cannot fall back to a
+default.
+
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 
-Everything inside a desktop runs as the unprivileged user `agent`, not root, so applications behave
-as they would on a workstation. `sudo` is available without a password when root is genuinely needed.
+Built-in images run everything as the unprivileged user `agent` (uid 1000), not root, so
+applications behave as they would on a workstation. `sudo` is available without a password when root
+is genuinely needed. A third-party flavour sets its own `[run].user`; when that uid maps to yours,
+bind-mounted files keep their ownership.
 
 ## Project structure
 
@@ -122,7 +148,7 @@ task lint        # python3 -m compileall + branch-docs check
 task image       # rebuild the three images
 ```
 
-Two environment variables exist for automation:
+Environment variables for automation:
 
 | Variable | Effect |
 |---|---|

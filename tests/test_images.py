@@ -7,8 +7,10 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -19,6 +21,8 @@ from deskbench.cli import build_parser
 from support import call, e2e_skip_reason
 
 BASE_IMAGE = "ghcr.io/nhermosilla14/agent-deskbench/desktop:1"
+ADAPTER_IMAGE = "localhost/agent-deskbench/adapter-fixture:1"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _container_image(container_id: str) -> str:
@@ -235,6 +239,228 @@ class UserFlavours(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, "a container was created for a bad manifest")
 
 
+ADAPTER_MANIFEST = """\
+image = "localhost/agent-deskbench/adapter-fixture:1"
+summary = "Adapter fixture"
+
+[viewer]
+port = 3000
+path = "/"
+
+[run]
+entrypoint = ["/usr/local/bin/adapter-entrypoint"]
+env = { ADAPTER_MARKER = "from-manifest", ADAPTER_SIZE = "{width}x{height}" }
+"""
+
+
+class Adapter(unittest.TestCase):
+    """A third-party image with its own viewer, entrypoint, environment and port is usable."""
+
+    desktop = "e2e-adapter"
+    flavour = "adapter"
+    size = "800x600"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        reason = e2e_skip_reason()
+        if reason:
+            raise unittest.SkipTest(reason)
+        cls.registry = os.environ["DESKBENCH_REGISTRY"]
+        base = f"{cls.registry}/desktop:1"
+        if not engine.image_exists(base):
+            raise unittest.SkipTest(
+                f"{base} is absent; build it with `task image` first"
+            )
+        if not engine.image_exists(ADAPTER_IMAGE):
+            try:
+                subprocess.run(
+                    ["podman", "build", "-t", ADAPTER_IMAGE, "tests/fixtures/adapter"],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise unittest.SkipTest(
+                    f"could not build the adapter fixture: {exc.stderr.strip()}"
+                ) from exc
+
+        cls._tempdir = tempfile.TemporaryDirectory()
+        directory = Path(cls._tempdir.name)
+        (directory / cls.flavour).mkdir()
+        (directory / cls.flavour / "flavour.toml").write_text(
+            ADAPTER_MANIFEST, encoding="utf-8"
+        )
+        cls._env = mock.patch.dict(
+            os.environ, {"DESKBENCH_FLAVOURS_DIR": str(directory)}
+        )
+        cls._env.start()
+        try:
+            call("stop", cls.desktop)
+            code, out, err = call(
+                "new", "--name", cls.desktop, "--size", cls.size,
+                "--flavour", cls.flavour,
+            )
+        except BaseException:
+            cls._cleanup()
+            raise
+        if code != 0:
+            cls._cleanup()
+            raise unittest.SkipTest(
+                f"could not start {cls.desktop}: {err.strip() or out.strip()}"
+            )
+        cls.created = json.loads(out)
+
+    @classmethod
+    def _cleanup(cls) -> None:
+        call("stop", cls.desktop)
+        cls._tempdir.cleanup()
+        cls._env.stop()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._cleanup()
+
+    def test_custom_viewer_port_path_and_entrypoint(self):
+        url = self.created["url"]
+        self.assertTrue(url.startswith("http://127.0.0.1:"), url)
+        self.assertTrue(url.endswith("/"), url)
+
+        with urllib.request.urlopen(url, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            body = response.read().decode("utf-8", "replace")
+        self.assertIn("adapter viewer", body.lower())
+
+        code, out, err = call("url", self.desktop)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), url)
+
+        code, out, err = call("ls", "--json")
+        self.assertEqual(code, 0, err)
+        rows = {row["name"]: row for row in json.loads(out)}
+        self.assertEqual(rows[self.desktop]["url"], url)
+
+        # The fixture's default entrypoint is /bin/false; running at all proves the override.
+        result = subprocess.run(
+            ["podman", "inspect", "--format", "{{json .Config.Entrypoint}}",
+             self.created["id"]],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("/usr/local/bin/adapter-entrypoint", result.stdout)
+        self.assertNotIn("/bin/false", result.stdout)
+
+    def cli(self, *argv: str) -> subprocess.CompletedProcess:
+        """Run the real entry point, so child output is captured rather than inherited."""
+        return subprocess.run(
+            [sys.executable, "-m", "deskbench", *argv],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_custom_environment_and_size_are_applied(self):
+        result = self.cli("exec", self.desktop, "--", "env")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ADAPTER_MARKER=from-manifest", result.stdout)
+        self.assertIn("ADAPTER_SIZE=800x600", result.stdout)
+
+        result = self.cli("exec", self.desktop, "--", "id", "-u")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "1000")
+
+    def test_default_screenshot_still_works(self):
+        handle, path = tempfile.mkstemp(prefix="deskbench-adapter-", suffix=".png")
+        os.close(handle)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        code, out, err = call("shot", self.desktop, "-o", path)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), path)
+        with open(path, "rb") as stream:
+            self.assertEqual(stream.read(8), b"\x89PNG\r\n\x1a\n")
+        self.assertGreater(os.path.getsize(path), 8)
+
+    def test_effective_configuration_is_stored_as_labels(self):
+        result = subprocess.run(
+            ["podman", "inspect", "--format", "{{json .Config.Labels}}",
+             self.created["id"]],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        labels = json.loads(result.stdout)
+        self.assertEqual(labels["deskbench"], "1")
+        self.assertEqual(labels["deskbench.viewer.port"], "3000")
+        self.assertEqual(labels["deskbench.viewer.path"], "/")
+        self.assertEqual(labels["deskbench.viewer.scheme"], "http")
+        self.assertEqual(labels["deskbench.run.user"], "1000:1000")
+
+
+class Listing(unittest.TestCase):
+    """``ls`` and ``exec`` read the container labels, and older containers keep working."""
+
+    runtime = runtimes.Runtime(name="podman", binary="podman")
+
+    def desktops(self, labels: dict[str, str] | None) -> list[engine.Desktop]:
+        item = {
+            "Names": ["deskbench-alpha"],
+            "State": "running",
+            "Id": "abc",
+            "Ports": [
+                {"host_ip": "127.0.0.1", "container_port": 6080,
+                 "host_port": 41234, "protocol": "tcp"},
+            ],
+        }
+        if labels is not None:
+            item["Labels"] = labels
+        proc = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps([item]), stderr="",
+        )
+        with mock.patch.object(engine, "_podman", return_value=proc), \
+                mock.patch.object(engine.runtimes, "detect", return_value=self.runtime):
+            return engine.list_desktops()
+
+    def test_a_container_without_labels_keeps_the_default_url(self):
+        desktop = self.desktops(None)[0]
+        self.assertEqual(
+            desktop.url,
+            "http://127.0.0.1:41234/vnc.html?autoconnect=1&resize=scale",
+        )
+        self.assertEqual(desktop.labels, {})
+
+    def test_labels_decide_the_url(self):
+        desktop = self.desktops({
+            "deskbench.viewer.port": "6080",
+            "deskbench.viewer.path": "/desk/",
+            "deskbench.viewer.scheme": "https",
+        })[0]
+        self.assertEqual(desktop.url, "https://127.0.0.1:41234/desk/")
+
+    def exec_args(self, labels: dict[str, str]) -> list[str]:
+        desktop = engine.Desktop(
+            name="alpha", container="deskbench-alpha", state="running",
+            url="", id="abc", labels=labels,
+        )
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(engine, "get", return_value=desktop), \
+                mock.patch.object(engine, "_podman", return_value=ok) as podman:
+            self.assertEqual(engine.exec_in("alpha", ["id", "-u"]), 0)
+        return podman.call_args.args[0]
+
+    def test_exec_uses_the_labelled_user(self):
+        self.assertEqual(
+            self.exec_args({"deskbench.run.user": "1234:5678"}),
+            ["exec", "--user", "1234:5678", "deskbench-alpha", "sh", "-lc", "id -u"],
+        )
+
+    def test_exec_without_a_label_uses_the_container_default(self):
+        self.assertEqual(
+            self.exec_args({}),
+            ["exec", "deskbench-alpha", "sh", "-lc", "id -u"],
+        )
+
+
 class Arguments(unittest.TestCase):
     def test_defaults_to_base_with_the_missing_pull_policy(self):
         args = build_parser().parse_args(["new"])
@@ -295,18 +521,189 @@ class PullPolicy(unittest.TestCase):
             url="http://127.0.0.1:6080/",
             id="abc",
         )
+        flavour = flavours.Flavour(name="demo", summary="", image=self.image, source="image")
         runtime = runtimes.Runtime(name="podman", binary="podman")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with mock.patch.object(engine, "image_exists", return_value=True), \
-                mock.patch.object(engine, "_podman") as podman, \
+                mock.patch.object(engine, "_podman", return_value=ok) as podman, \
                 mock.patch.object(engine.runtimes, "detect", return_value=runtime), \
                 mock.patch.object(engine, "get", return_value=desktop), \
                 mock.patch.object(engine, "wait_ready", return_value=desktop):
-            created = engine.create("demo", "800x600", self.image)
+            created = engine.create("demo", "800x600", flavour)
 
         self.assertIs(created, desktop)
         self.assertTrue(podman.called)
         for invocation in podman.call_args_list:
             self.assertNotIn("build", invocation.args[0])
+
+
+class CommandLine(unittest.TestCase):
+    """The manifest reaches the runtime as the right flags, and nothing else."""
+
+    image = BASE_IMAGE
+
+    def run_args(self, flavour: flavours.Flavour, size: str = "800x600") -> list[str]:
+        desktop = engine.Desktop(
+            name="demo",
+            container="deskbench-demo",
+            state="running",
+            url="http://127.0.0.1:3000/",
+            id="abc",
+        )
+        runtime = runtimes.Runtime(name="podman", binary="podman")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(engine, "image_exists", return_value=True), \
+                mock.patch.object(engine, "_podman", return_value=ok) as podman, \
+                mock.patch.object(engine.runtimes, "detect", return_value=runtime), \
+                mock.patch.object(engine, "get", return_value=desktop), \
+                mock.patch.object(engine, "wait_ready", return_value=desktop):
+            engine.create("demo", size, flavour)
+        return podman.call_args_list[0].args[0]
+
+    def test_the_viewer_port_and_contract_become_flags_and_labels(self):
+        flavour = flavours.Flavour(
+            name="adapter",
+            summary="",
+            image=self.image,
+            source="user",
+            viewer=flavours.Viewer(port=3000, path="/desk/", scheme="https", timeout=5),
+        )
+        args = self.run_args(flavour)
+        self.assertEqual(args[:2], ["run", "-d"])
+        self.assertIn("127.0.0.1::3000", args)
+        self.assertNotIn("127.0.0.1::6080", args)
+        for label in (
+            "deskbench.viewer.port=3000",
+            "deskbench.viewer.path=/desk/",
+            "deskbench.viewer.scheme=https",
+            "deskbench.run.user=1000:1000",
+        ):
+            with self.subTest(label=label):
+                self.assertIn(label, args)
+        self.assertEqual(args[-1], self.image)
+
+    def test_entrypoint_and_command_follow_the_image(self):
+        flavour = flavours.Flavour(
+            name="adapter",
+            summary="",
+            image=self.image,
+            source="user",
+            run=flavours.Run(entrypoint=("/bin/init", "--fast"), command=("serve", "3000")),
+        )
+        args = self.run_args(flavour)
+        entrypoint = args.index("--entrypoint")
+        self.assertEqual(args[entrypoint + 1], "/bin/init")
+        self.assertEqual(args[-4:], [self.image, "--fast", "serve", "3000"])
+
+    def test_command_alone_needs_no_entrypoint(self):
+        flavour = flavours.Flavour(
+            name="adapter", summary="", image=self.image, source="user",
+            run=flavours.Run(command=("serve",)),
+        )
+        args = self.run_args(flavour)
+        self.assertNotIn("--entrypoint", args)
+        self.assertEqual(args[-2:], [self.image, "serve"])
+
+    def test_environment_substitutes_the_size(self):
+        flavour = flavours.Flavour(
+            name="adapter",
+            summary="",
+            image=self.image,
+            source="user",
+            run=flavours.Run(env={
+                "ADAPTER_MARKER": "from-manifest",
+                "ADAPTER_SIZE": "{width}x{height}",
+                "NOT_A_PLACEHOLDER": "a{other}",
+            }),
+        )
+        args = self.run_args(flavour, size="1024x768")
+        environment = [args[index + 1] for index, item in enumerate(args[:-1])
+                       if item == "-e"]
+        self.assertIn("DESKBENCH_SIZE=1024x768", environment)
+        self.assertIn("ADAPTER_MARKER=from-manifest", environment)
+        self.assertIn("ADAPTER_SIZE=1024x768", environment)
+        self.assertIn("NOT_A_PLACEHOLDER=a{other}", environment)
+
+    def test_a_manifest_can_override_the_size_variable(self):
+        flavour = flavours.Flavour(
+            name="adapter",
+            summary="",
+            image=self.image,
+            source="user",
+            run=flavours.Run(env={"DESKBENCH_SIZE": "{width}:{height}"}),
+        )
+        args = self.run_args(flavour, size="640x480")
+        sizes = [args[index + 1] for index, item in enumerate(args[:-1])
+                 if item == "-e" and args[index + 1].startswith("DESKBENCH_SIZE=")]
+        self.assertEqual(sizes[-1], "DESKBENCH_SIZE=640:480")
+
+
+class ContractProbe(unittest.TestCase):
+    """``new`` refuses a desktop whose shell cannot run a command, and cleans it up."""
+
+    image = BASE_IMAGE
+
+    def create(self, shell_returns: int) -> tuple[engine.EngineError, mock.Mock]:
+        desktop = engine.Desktop(
+            name="demo",
+            container="deskbench-demo",
+            state="running",
+            url="http://127.0.0.1:6080/",
+            id="abc",
+        )
+        runtime = runtimes.Runtime(name="podman", binary="podman")
+
+        def podman(args, **kwargs):
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=shell_returns if args[0] == "exec" else 0,
+                stdout="",
+                stderr="",
+            )
+
+        with mock.patch.object(engine, "image_exists", return_value=True), \
+                mock.patch.object(engine, "_podman", side_effect=podman) as call_mock, \
+                mock.patch.object(engine.runtimes, "detect", return_value=runtime), \
+                mock.patch.object(engine, "get", return_value=desktop), \
+                mock.patch.object(engine, "wait_ready", return_value=desktop):
+            with self.assertRaises(engine.EngineError) as caught:
+                engine.create("demo", "800x600", flavours.adhoc(self.image))
+        return caught.exception, call_mock
+
+    def test_a_missing_shell_is_an_error_naming_the_flavour(self):
+        error, _ = self.create(shell_returns=127)
+        self.assertIn("image", str(error))
+        self.assertIn("'sh'", str(error))
+
+    def test_the_shell_probe_runs_as_the_configured_user(self):
+        _, calls = self.create(shell_returns=127)
+        probe = [entry.args[0] for entry in calls.call_args_list if entry.args[0][0] == "exec"]
+        self.assertEqual(
+            probe,
+            [["exec", "--user", "1000:1000", "deskbench-demo", "sh", "-lc", "true"]],
+        )
+
+    def test_a_failed_new_leaves_no_container(self):
+        _, calls = self.create(shell_returns=127)
+        invocations = [entry.args[0] for entry in calls.call_args_list]
+        self.assertIn(["stop", "--time", "2", "deskbench-demo"], invocations)
+
+    def test_a_shell_less_viewer_timeout_also_cleans_up(self):
+        desktop = engine.Desktop(
+            name="demo", container="deskbench-demo", state="running", url="", id="abc",
+        )
+        runtime = runtimes.Runtime(name="podman", binary="podman")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(engine, "image_exists", return_value=True), \
+                mock.patch.object(engine, "_podman", return_value=ok) as calls, \
+                mock.patch.object(engine.runtimes, "detect", return_value=runtime), \
+                mock.patch.object(engine, "get", return_value=desktop), \
+                mock.patch.object(engine, "wait_ready",
+                                  side_effect=engine.EngineError("no viewer")):
+            with self.assertRaises(engine.EngineError):
+                engine.create("demo", "800x600", flavours.adhoc(self.image))
+        invocations = [entry.args[0] for entry in calls.call_args_list]
+        self.assertIn(["stop", "--time", "2", "deskbench-demo"], invocations)
 
 
 if __name__ == "__main__":

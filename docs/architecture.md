@@ -27,10 +27,12 @@ version.
 
 ## State
 
-There is no local state. `podman ps --filter label=deskbench=1` is the list of desktops; the
-container's published port is the viewer URL; the container name is the desktop name. A tray process
-that outlives its containers is impossible to observe as stale: it recounts on every event and exits
-at zero.
+There is no local state. `podman ps --filter label=deskbench=1` is the list of desktops and the
+container name is the desktop name. The container also carries the resolved contract as labels:
+`deskbench.viewer.port`, `deskbench.viewer.path`, `deskbench.viewer.scheme` and
+`deskbench.run.user`. `ls`, `url` and `exec` read them, so a manifest edited later cannot mutate a
+running desktop. Containers without those labels fall back to the built-in layout (port 6080, the
+noVNC path, `http`, user `1000:1000`).
 
 ## Images
 
@@ -40,10 +42,13 @@ pulls a missing reference and never builds. `image/` and `image/flavours/*` are 
 `task image` and the publishing pipeline, not a runtime dependency.
 
 User flavours live in `$XDG_CONFIG_HOME/agent-deskbench/flavours/<name>/flavour.toml` (default
-`~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference
-and an optional summary; `flavours.discover()` merges valid manifests with the built-ins for
-`images`, reporting bad candidates as problems, and `get()` resolves a user name at `new` time. A
-directory that shadows a built-in is an error.
+`~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference,
+an optional summary, and optional `[viewer]` and `[run]` tables describing a third-party image's
+contract: `port`, `path`, `scheme` and `timeout` for the viewer; `user`, `entrypoint`, `command` and
+`env` for the process, with `{width}`/`{height}` substituted from `--size`. Unknown keys and invalid
+values are errors. `flavours.discover()` merges valid manifests with the built-ins for `images`,
+reporting bad candidates as problems, and `get()` resolves a user name at `new` time. A directory
+that shadows a built-in is an error.
 
 ## Module map
 
@@ -62,9 +67,9 @@ directory that shadows a built-in is an error.
 - The container is the only isolated unit; the host shares its kernel with it.
 - The CLI never builds an image: it pulls according to `--pull`. Images are produced by `task image`
   locally and by the publishing workflow on a release.
-- Inside the container everything runs as `agent` (uid 1000). `--userns=keep-id:uid=1000` maps that
-  uid to whoever invoked the tool, so bind-mounted files keep their ownership in both directions and
-  host files never come back owned by a subuid.
+- Inside a built-in image everything runs as `agent` (uid 1000). A manifest may set `[run].user` to
+  another uid; the runtime maps that uid to whoever invoked the tool, so bind-mounted files keep
+  their ownership in both directions only when the configured uid matches the host mapping.
 - `sudo` inside the container escalates to the namespace root, which is not the host root: it cannot
   touch host files the invoking user does not already own.
 - The viewer port is published on `127.0.0.1` only.

@@ -1,10 +1,12 @@
 """Desktop flavours as OCI image references.
 
-A flavour is the choice of image a desktop starts from. Built-in flavours resolve to fully
-qualified references under a registry that ``DESKBENCH_REGISTRY`` can redirect at call time, so a
-development or test run can use locally built images. A user flavour is a directory under the
-user config directory whose ``flavour.toml`` names the image, so a flavour can be added without
-editing the project. References are validated here before they reach the container runtime.
+A flavour is the choice of image a desktop starts from, plus the contract that image satisfies:
+where its viewer is and which user, argv and environment it needs. Built-in flavours resolve to
+fully qualified references under a registry that ``DESKBENCH_REGISTRY`` can redirect at call
+time, so a development or test run can use locally built images. A user flavour is a directory
+under the user config directory whose ``flavour.toml`` describes the image and any differences
+from the built-in contract, so a third-party image can be added without editing the project.
+References and contract values are validated here before they reach the container runtime.
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from . import sessions
 
 DEFAULT_REGISTRY = "ghcr.io/nhermosilla14/agent-deskbench"
 TAG_VERSION = "1"
@@ -28,7 +32,11 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _WHITESPACE = re.compile(r"\s")
 _FLAVOUR_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$")
 
-_MANIFEST_KEYS = frozenset({"image", "summary"})
+_MANIFEST_KEYS = frozenset({"image", "summary", "viewer", "run"})
+_VIEWER_KEYS = frozenset({"port", "path", "scheme", "timeout"})
+_RUN_KEYS = frozenset({"user", "entrypoint", "command", "env"})
+_SCHEMES = ("http", "https")
+_MAX_ID = 2**31 - 1
 
 # name -> (image name under the registry, summary)
 _BUILTINS: dict[str, tuple[str, str]] = {
@@ -64,13 +72,42 @@ class ManifestError(ValueError):
 
 
 @dataclass(frozen=True)
+class Viewer:
+    """Where a desktop's HTTP viewer listens inside the container.
+
+    The defaults reproduce the built-in image, so a manifest only states what differs.
+    """
+
+    port: int = sessions.WEB_PORT
+    path: str = sessions.DEFAULT_VIEWER_PATH
+    scheme: str = "http"
+    timeout: int = 30
+
+
+@dataclass(frozen=True)
+class Run:
+    """The identity, argv and environment a desktop's process needs.
+
+    ``user`` is ``uid:gid`` inside the container and is also the identity used for ``exec``.
+    ``{width}`` and ``{height}`` in an environment value are replaced with the requested size.
+    """
+
+    user: str = "1000:1000"
+    entrypoint: tuple[str, ...] = ()
+    command: tuple[str, ...] = ()
+    env: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Flavour:
-    """One flavour: the name a caller uses and the image it starts."""
+    """One flavour: the name a caller uses, the image it starts and its desktop contract."""
 
     name: str
     summary: str
     image: str
     source: str = "builtin"
+    viewer: Viewer = field(default_factory=Viewer)
+    run: Run = field(default_factory=Run)
 
 
 @dataclass(frozen=True)
@@ -163,10 +200,160 @@ def _builtin(name: str) -> Flavour:
     )
 
 
-def _read_manifest(path: Path) -> tuple[str, str | None]:
-    """Parse and validate one manifest, raising :class:`ManifestError` without the path.
+def adhoc(image: str) -> Flavour:
+    """Return a flavour for a bare ``--image`` reference: the defaults, plus that image."""
+    return Flavour(
+        name="image",
+        summary="",
+        image=validate_image_ref(image),
+        source="image",
+    )
 
-    The caller adds the path: discovery reports it separately, and ``get`` prefixes the error.
+
+def parse_user(value: str) -> tuple[int, int]:
+    """Parse ``uid`` or ``uid:gid`` into a pair of ids.
+
+    Both sides are decimal digits, the gid defaults to the uid, and neither may exceed the
+    largest value Linux accepts. Anything else is rejected instead of being handed to the
+    runtime, where the failure would be opaque.
+    """
+    parts = value.split(":")
+    if len(parts) > 2:
+        raise ValueError(
+            f"invalid user {value!r}: expected UID or UID:GID, for example 1000:1000"
+        )
+    numbers: list[int] = []
+    for part in parts:
+        if not part.isascii() or not part.isdigit():
+            raise ValueError(
+                f"invalid user {value!r}: {part!r} is not a non-negative decimal number"
+            )
+        number = int(part)
+        if number > _MAX_ID:
+            raise ValueError(f"invalid user {value!r}: ids must not exceed {_MAX_ID}")
+        numbers.append(number)
+    uid = numbers[0]
+    gid = numbers[1] if len(numbers) == 2 else uid
+    return uid, gid
+
+
+def _table(
+    document: dict[str, object], key: str, allowed: frozenset[str]
+) -> dict[str, object]:
+    """Return the ``[key]`` table, rejecting unknown keys so a typo cannot be ignored."""
+    table = document.get(key)
+    if table is None:
+        return {}
+    if not isinstance(table, dict):
+        raise ManifestError(f"'{key}' must be a table, not {type(table).__name__}")
+    unknown = sorted(set(table) - allowed)
+    if unknown:
+        keys = ", ".join(repr(item) for item in unknown)
+        raise ManifestError(
+            f"unknown key{'s' if len(unknown) > 1 else ''} {keys} in [{key}]; "
+            f"this version accepts only {', '.join(repr(item) for item in sorted(allowed))}"
+        )
+    return table
+
+
+def _viewer(table: dict[str, object]) -> Viewer:
+    viewer = Viewer()
+
+    port = table.get("port", viewer.port)
+    if isinstance(port, bool) or not isinstance(port, int):
+        raise ManifestError(f"'viewer.port' must be an integer, not {type(port).__name__}")
+    if not 1 <= port <= 65535:
+        raise ManifestError(f"'viewer.port' must be between 1 and 65535, not {port}")
+
+    path = table.get("path", viewer.path)
+    if not isinstance(path, str):
+        raise ManifestError(f"'viewer.path' must be a string, not {type(path).__name__}")
+    if not path:
+        raise ManifestError("'viewer.path' must not be empty")
+    if not path.startswith("/"):
+        raise ManifestError(f"'viewer.path' must start with '/': {path!r}")
+    if _WHITESPACE.search(path):
+        raise ManifestError(f"'viewer.path' must not contain whitespace: {path!r}")
+
+    scheme = table.get("scheme", viewer.scheme)
+    if not isinstance(scheme, str):
+        raise ManifestError(f"'viewer.scheme' must be a string, not {type(scheme).__name__}")
+    if scheme not in _SCHEMES:
+        raise ManifestError(
+            f"'viewer.scheme' must be one of {', '.join(repr(item) for item in _SCHEMES)}, "
+            f"not {scheme!r}"
+        )
+
+    timeout = table.get("timeout", viewer.timeout)
+    if isinstance(timeout, bool) or not isinstance(timeout, int):
+        raise ManifestError(
+            f"'viewer.timeout' must be an integer, not {type(timeout).__name__}"
+        )
+    if timeout < 1:
+        raise ManifestError(f"'viewer.timeout' must be at least 1 second, not {timeout}")
+
+    return Viewer(port=port, path=path, scheme=scheme, timeout=timeout)
+
+
+def _argv(table: dict[str, object], key: str) -> tuple[str, ...]:
+    value = table.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ManifestError(f"'run.{key}' must be a list of strings, not {type(value).__name__}")
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ManifestError(
+                f"'run.{key}[{index}]' must be a string, not {type(item).__name__}"
+            )
+        if not item:
+            raise ManifestError(f"'run.{key}[{index}]' must not be empty")
+    return tuple(value)
+
+
+def _env(table: dict[str, object]) -> dict[str, str]:
+    value = table.get("env")
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ManifestError(f"'run.env' must be a table, not {type(value).__name__}")
+    env: dict[str, str] = {}
+    for key, item in value.items():
+        if not key:
+            raise ManifestError("'run.env' keys must not be empty")
+        if "=" in key:
+            raise ManifestError(f"'run.env' key {key!r} must not contain '='")
+        if not isinstance(item, str):
+            raise ManifestError(
+                f"'run.env.{key}' must be a string, not {type(item).__name__}"
+            )
+        env[key] = item
+    return env
+
+
+def _run(table: dict[str, object]) -> Run:
+    run = Run()
+
+    user = table.get("user", run.user)
+    if not isinstance(user, str):
+        raise ManifestError(f"'run.user' must be a string, not {type(user).__name__}")
+    try:
+        parse_user(user)
+    except ValueError as exc:
+        raise ManifestError(f"'run.user' is not usable: {exc}") from None
+
+    return Run(
+        user=user,
+        entrypoint=_argv(table, "entrypoint"),
+        command=_argv(table, "command"),
+        env=_env(table),
+    )
+
+
+def _read_manifest(name: str, path: Path) -> Flavour:
+    """Parse and validate one manifest into a complete user flavour.
+
+    The path is not part of the error: discovery reports it separately, and ``get`` prefixes it.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -182,7 +369,7 @@ def _read_manifest(path: Path) -> tuple[str, str | None]:
         keys = ", ".join(repr(key) for key in unknown)
         raise ManifestError(
             f"unknown key{'s' if len(unknown) > 1 else ''} {keys}; "
-            "this version accepts only 'image' and 'summary'"
+            "this version accepts only 'image', 'summary', 'viewer' and 'run'"
         )
     if "image" not in document:
         raise ManifestError("missing required key 'image'")
@@ -198,7 +385,15 @@ def _read_manifest(path: Path) -> tuple[str, str | None]:
     summary = document.get("summary")
     if summary is not None and not isinstance(summary, str):
         raise ManifestError(f"'summary' must be a string, not {type(summary).__name__}")
-    return image, summary
+
+    return Flavour(
+        name=name,
+        summary=summary if summary is not None else USER_SUMMARY,
+        image=image,
+        source="user",
+        viewer=_viewer(_table(document, "viewer", _VIEWER_KEYS)),
+        run=_run(_table(document, "run", _RUN_KEYS)),
+    )
 
 
 def _shadow_message(name: str) -> str:
@@ -241,16 +436,10 @@ def discover() -> Discovery:
             name = validate_flavour_name(entry.name)
             if name in _BUILTINS:
                 raise ManifestError(_shadow_message(name))
-            image, summary = _read_manifest(manifest)
+            found[name] = _read_manifest(name, manifest)
         except ManifestError as exc:
             problems.append(ManifestProblem(manifest, str(exc)))
             continue
-        found[name] = Flavour(
-            name=name,
-            summary=summary if summary is not None else USER_SUMMARY,
-            image=image,
-            source="user",
-        )
 
     return Discovery(
         flavours=sorted(found.values(), key=lambda item: item.name),
@@ -282,15 +471,9 @@ def get(name: str) -> Flavour:
             f"unknown flavour {name!r}; choose one of: {', '.join(available_names())}"
         )
     try:
-        image, summary = _read_manifest(manifest)
+        return _read_manifest(name, manifest)
     except ManifestError as exc:
         raise ManifestError(f"{manifest}: {exc}") from None
-    return Flavour(
-        name=name,
-        summary=summary if summary is not None else USER_SUMMARY,
-        image=image,
-        source="user",
-    )
 
 
 def _invalid(value: str, problem: str) -> InvalidImage:

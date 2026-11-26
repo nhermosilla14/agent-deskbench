@@ -13,6 +13,8 @@ import re
 import shutil
 from dataclasses import dataclass
 
+from . import sessions
+
 PODMAN = "podman"
 DOCKER = "docker"
 WEB_PORT = 6080
@@ -48,16 +50,20 @@ def detect() -> Runtime:
     raise MissingRuntime("no container runtime found: install podman (preferred) or docker")
 
 
-def user_args(runtime: Runtime) -> list[str]:
-    """Map the in-image user (uid 1000) to the invoking host user.
+def user_args(runtime: Runtime, uid: int = IMAGE_UID, gid: int = IMAGE_UID) -> list[str]:
+    """Map the in-image user to the invoking host user, and start the process as that user.
 
-    Podman can express this exactly. Docker cannot: rootful Docker maps container uid 1000 to host
-    uid 1000 directly, so ``--user`` is enough on the common single-user machine, and rootless
-    Docker needs its own userns-remap configuration.
+    Podman can express the mapping exactly. Docker cannot: rootful Docker maps container uid 1000
+    to host uid 1000 directly, so ``--user`` is enough on the common single-user machine, and
+    rootless Docker needs its own userns-remap configuration.
     """
     if runtime.is_podman:
-        return [f"--userns=keep-id:uid={IMAGE_UID},gid={IMAGE_UID}"]
-    return ["--user", f"{IMAGE_UID}:{IMAGE_UID}"]
+        return [
+            f"--userns=keep-id:uid={uid},gid={gid}",
+            "--user",
+            f"{uid}:{gid}",
+        ]
+    return ["--user", f"{uid}:{gid}"]
 
 
 def image_exists_args(runtime: Runtime, image: str) -> list[str]:
@@ -77,35 +83,69 @@ def events_command(runtime: Runtime, label: str) -> list[str]:
 _DOCKER_PORT = re.compile(r":(\d+)->(\d+)/tcp")
 
 
-def _podman_host_port(entries: object) -> int | None:
+def _viewer_port(labels: dict[str, str]) -> int:
+    """The container port the desktop publishes, from its labels, defaulting to the base layout."""
+    value = labels.get(sessions.VIEWER_PORT_LABEL)
+    if value is not None:
+        try:
+            port = int(value)
+        except ValueError:
+            return WEB_PORT
+        if 1 <= port <= 65535:
+            return port
+    return WEB_PORT
+
+
+def _podman_labels(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}
+
+
+def _docker_labels(value: object) -> dict[str, str]:
+    """Parse Docker's comma-separated ``key=value`` label string."""
+    if not isinstance(value, str) or not value:
+        return {}
+    labels: dict[str, str] = {}
+    for entry in value.split(","):
+        key, separator, item = entry.partition("=")
+        if not separator or not key:
+            continue
+        labels[key] = item
+    return labels
+
+
+def _podman_host_port(entries: object, viewer_port: int = WEB_PORT) -> int | None:
     for entry in entries or []:  # type: ignore[union-attr]
-        if entry.get("container_port") == WEB_PORT and entry.get("protocol", "tcp") == "tcp":
+        if entry.get("container_port") == viewer_port and entry.get("protocol", "tcp") == "tcp":
             port = entry.get("host_port")
             if port:
                 return int(port)
     return None
 
 
-def _docker_host_port(ports: object) -> int | None:
+def _docker_host_port(ports: object, viewer_port: int = WEB_PORT) -> int | None:
     for match in _DOCKER_PORT.finditer(str(ports or "")):
-        if int(match.group(2)) == WEB_PORT:
+        if int(match.group(2)) == viewer_port:
             return int(match.group(1))
     return None
 
 
 def parse_ps(output: str, runtime: Runtime) -> list[dict]:
-    """Normalise ``ps --format json`` into ``[{name, state, host_port, id}]``."""
+    """Normalise ``ps --format json`` into ``[{name, state, host_port, id, labels}]``."""
     rows: list[dict] = []
     if runtime.is_podman:
         for item in json.loads(output or "[]"):
             names = item.get("Names") or []
             if not names:
                 continue
+            labels = _podman_labels(item.get("Labels"))
             rows.append({
                 "name": names[0],
                 "state": item.get("State", "unknown"),
-                "host_port": _podman_host_port(item.get("Ports")),
+                "host_port": _podman_host_port(item.get("Ports"), _viewer_port(labels)),
                 "id": item.get("Id", ""),
+                "labels": labels,
             })
         return rows
 
@@ -116,10 +156,12 @@ def parse_ps(output: str, runtime: Runtime) -> list[dict]:
         name = item.get("Names") or ""
         if not name:
             continue
+        labels = _docker_labels(item.get("Labels"))
         rows.append({
             "name": name,
             "state": item.get("State", "unknown"),
-            "host_port": _docker_host_port(item.get("Ports")),
+            "host_port": _docker_host_port(item.get("Ports"), _viewer_port(labels)),
             "id": item.get("ID", ""),
+            "labels": labels,
         })
     return rows

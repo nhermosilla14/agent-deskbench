@@ -71,6 +71,21 @@ class Urls(unittest.TestCase):
         url = sessions.viewer_url(41234)
         self.assertTrue(url.startswith("http://127.0.0.1:41234/"))
         self.assertIn("autoconnect=1", url)
+        self.assertEqual(
+            url, "http://127.0.0.1:41234" + sessions.DEFAULT_VIEWER_PATH
+        )
+
+    def test_custom_scheme_and_path(self):
+        self.assertEqual(
+            sessions.viewer_url(3000, scheme="https", path="/desk/index.html"),
+            "https://127.0.0.1:3000/desk/index.html",
+        )
+
+    def test_missing_leading_slash_is_added(self):
+        self.assertEqual(
+            sessions.viewer_url(3000, path="vnc.html"),
+            "http://127.0.0.1:3000/vnc.html",
+        )
 
 
 if __name__ == "__main__":

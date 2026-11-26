@@ -269,11 +269,11 @@ class Discovery(unittest.TestCase):
 
     def test_unknown_key_is_a_problem(self):
         write_manifest(
-            self.root, "broken", f'image = "{IMAGE}"\nviewer = "never"\n'
+            self.root, "broken", f'image = "{IMAGE}"\ncolour = "never"\n'
         )
         problem = flavours.discover().problems[0]
         self.assertIn("unknown key", problem.message)
-        self.assertIn("viewer", problem.message)
+        self.assertIn("colour", problem.message)
 
     def test_non_string_values_are_problems(self):
         for body in (f"image = {1}\n", f'image = "{IMAGE}"\nsummary = 1\n'):
@@ -383,6 +383,217 @@ class Discovery(unittest.TestCase):
         self.assertEqual(
             [flavour.name for flavour in discovery.flavours], flavours.names()
         )
+
+
+class Defaults(unittest.TestCase):
+    """A flavour that says nothing about the contract behaves like the built-in image."""
+
+    def test_viewer_defaults_reproduce_the_base_layout(self):
+        viewer = flavours.Viewer()
+        self.assertEqual(viewer.port, 6080)
+        self.assertEqual(viewer.path, "/vnc.html?autoconnect=1&resize=scale")
+        self.assertEqual(viewer.scheme, "http")
+        self.assertEqual(viewer.timeout, 30)
+
+    def test_run_defaults_reproduce_the_base_layout(self):
+        run = flavours.Run()
+        self.assertEqual(run.user, "1000:1000")
+        self.assertEqual(run.entrypoint, ())
+        self.assertEqual(run.command, ())
+        self.assertEqual(run.env, {})
+
+    def test_builtins_use_the_default_contract(self):
+        with registry_env(None):
+            for name in flavours.names():
+                with self.subTest(flavour=name):
+                    flavour = flavours.get(name)
+                    self.assertEqual(flavour.viewer, flavours.Viewer())
+                    self.assertEqual(flavour.run, flavours.Run())
+
+    def test_adhoc_uses_the_default_contract(self):
+        flavour = flavours.adhoc(IMAGE)
+        self.assertEqual(flavour.name, "image")
+        self.assertEqual(flavour.summary, "")
+        self.assertEqual(flavour.image, IMAGE)
+        self.assertEqual(flavour.source, "image")
+        self.assertEqual(flavour.viewer, flavours.Viewer())
+        self.assertEqual(flavour.run, flavours.Run())
+
+    def test_adhoc_validates_the_reference(self):
+        with self.assertRaises(flavours.InvalidImage) as caught:
+            flavours.adhoc("debian:12")
+        self.assertIn(flavours.EXAMPLE_IMAGE, str(caught.exception))
+
+
+class Users(unittest.TestCase):
+    """``run.user`` is an id pair, and a bad one is caught before the runtime sees it."""
+
+    def test_one_part_uses_the_uid_as_gid(self):
+        self.assertEqual(flavours.parse_user("1000"), (1000, 1000))
+        self.assertEqual(flavours.parse_user("0"), (0, 0))
+
+    def test_two_parts_are_used_as_given(self):
+        self.assertEqual(flavours.parse_user("1234:5678"), (1234, 5678))
+        self.assertEqual(flavours.parse_user("0:0"), (0, 0))
+        self.assertEqual(flavours.parse_user("1000:0"), (1000, 0))
+
+    def test_rejected_values(self):
+        for value in ("", "root", "1000:abc", "abc:1000", "-1", "1000:-1",
+                      "1:2:3", "1000:", ":1000", " 1000", "1000 ", "1.0",
+                      "\u0661\u0660\u0660\u0660",
+                      str(2**31), f"{2**31}:0", f"0:{2**31}"):
+            with self.subTest(value=value), self.assertRaises(ValueError) as caught:
+                flavours.parse_user(value)
+            self.assertIn("invalid user", str(caught.exception))
+
+    def test_largest_accepted_id(self):
+        limit = 2**31 - 1
+        self.assertEqual(flavours.parse_user(f"{limit}:{limit}"), (limit, limit))
+
+
+class Schema(unittest.TestCase):
+    """The manifest describes the whole contract; unknown keys and bad values are refused."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        env = mock.patch.dict(
+            os.environ, {"DESKBENCH_FLAVOURS_DIR": str(self.root)}
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+    def write(self, body: str) -> None:
+        write_manifest(self.root, "custom", body)
+
+    def error(self, body: str) -> str:
+        self.write(body)
+        with self.assertRaises(flavours.ManifestError) as caught:
+            flavours.get("custom")
+        return str(caught.exception)
+
+    def test_full_viewer_and_run_tables_are_parsed(self):
+        self.write(
+            f'image = "{IMAGE}"\n'
+            'summary = "Custom"\n'
+            "\n"
+            "[viewer]\n"
+            "port = 3000\n"
+            'path = "/desk/"\n'
+            'scheme = "https"\n'
+            "timeout = 12\n"
+            "\n"
+            "[run]\n"
+            'user = "1234:5678"\n'
+            'entrypoint = ["/bin/init", "--fast"]\n'
+            'command = ["serve", "3000"]\n'
+            'env = { WIDTH = "{width}", HEIGHT = "{height}" }\n'
+        )
+        flavour = flavours.get("custom")
+        self.assertEqual(flavour.viewer, flavours.Viewer(
+            port=3000, path="/desk/", scheme="https", timeout=12,
+        ))
+        self.assertEqual(flavour.run.user, "1234:5678")
+        self.assertEqual(flavour.run.entrypoint, ("/bin/init", "--fast"))
+        self.assertEqual(flavour.run.command, ("serve", "3000"))
+        self.assertEqual(flavour.run.env, {"WIDTH": "{width}", "HEIGHT": "{height}"})
+
+    def test_partial_tables_keep_the_defaults(self):
+        self.write(
+            f'image = "{IMAGE}"\n'
+            "[viewer]\n"
+            "port = 3000\n"
+            "[run]\n"
+            'user = "0:0"\n'
+        )
+        flavour = flavours.get("custom")
+        self.assertEqual(flavour.viewer, flavours.Viewer(port=3000))
+        self.assertEqual(flavour.run, flavours.Run(user="0:0"))
+
+    def test_unknown_keys_inside_a_table_are_refused(self):
+        cases = {
+            "viewer": ('[viewer]\ncolour = "blue"\n', "colour"),
+            "run": ('[run]\ncwd = "/"\n', "cwd"),
+            "top": ('[screenshot]\ncommand = ["x"]\n', "screenshot"),
+        }
+        for label, (body, key) in cases.items():
+            with self.subTest(table=label):
+                message = self.error(f'image = "{IMAGE}"\n{body}')
+                self.assertIn("unknown key", message)
+                self.assertIn(key, message)
+
+    def test_wrong_types_are_refused(self):
+        bodies = (
+            'viewer = "never"\n',
+            "[viewer]\nport = \"3000\"\n",
+            "[viewer]\nport = 3000.5\n",
+            "[viewer]\npath = 1234\n",
+            "[viewer]\nscheme = 1\n",
+            "[viewer]\ntimeout = \"30\"\n",
+            '[run]\nuser = 1000\n',
+            '[run]\nentrypoint = "/bin/sh"\n',
+            '[run]\ncommand = "serve"\n',
+            '[run]\nenv = "A=B"\n',
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                message = self.error(f'image = "{IMAGE}"\n{body}')
+                self.assertIn("must be", message)
+
+    def test_viewer_values_are_validated(self):
+        cases = (
+            ("port", "0", "between 1 and 65535"),
+            ("port", "65536", "between 1 and 65535"),
+            ("port", "true", "must be an integer"),
+            ("port", "false", "must be an integer"),
+            ("path", '""', "must not be empty"),
+            ("path", '"vnc.html"', "must start with '/'"),
+            ("path", '"/a b"', "must not contain whitespace"),
+            ("path", '"/vnc.html?x=1 2"', "must not contain whitespace"),
+            ("scheme", '"ftp"', "must be one of"),
+            ("timeout", "0", "at least 1"),
+            ("timeout", "-1", "at least 1"),
+            ("timeout", "true", "must be an integer"),
+        )
+        for key, value, expected in cases:
+            with self.subTest(key=key, value=value):
+                message = self.error(f'image = "{IMAGE}"\n[viewer]\n{key} = {value}\n')
+                self.assertIn(expected, message)
+
+    def test_bad_run_users_are_refused(self):
+        for value in ("root", "1000:abc", "1:2:3", "-1", str(2**31)):
+            with self.subTest(value=value):
+                message = self.error(f'image = "{IMAGE}"\n[run]\nuser = "{value}"\n')
+                self.assertIn("run.user", message)
+
+    def test_entrypoint_and_command_items_are_validated(self):
+        for key in ("entrypoint", "command"):
+            with self.subTest(key=key, value="empty"):
+                message = self.error(f'image = "{IMAGE}"\n[run]\n{key} = [""]\n')
+                self.assertIn(key, message)
+                self.assertIn("must not be empty", message)
+            with self.subTest(key=key, value="non-string"):
+                message = self.error(f'image = "{IMAGE}"\n[run]\n{key} = [1]\n')
+                self.assertIn(key, message)
+                self.assertIn("must be a string", message)
+
+    def test_env_is_validated(self):
+        message = self.error(f'image = "{IMAGE}"\n[run]\nenv = {{ "A=B" = "c" }}\n')
+        self.assertIn("must not contain '='", message)
+
+        for value in ("1", "true"):
+            with self.subTest(value=value):
+                message = self.error(f'image = "{IMAGE}"\n[run]\nenv = {{ A = {value} }}\n')
+                self.assertIn("run.env.A", message)
+                self.assertIn("must be a string", message)
+
+    def test_a_screenshot_table_is_still_unknown(self):
+        message = self.error(
+            f'image = "{IMAGE}"\n[screenshot]\nsettle = false\n'
+        )
+        self.assertIn("unknown key", message)
+        self.assertIn("screenshot", message)
 
 
 if __name__ == "__main__":

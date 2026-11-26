@@ -1,5 +1,6 @@
 # Viewer and run adapter
 
+- Status: Done
 - Intents: 20261126-adapt-third-party-desktops
 - ADRs: 20261126-desktop-image-contract
 - Depends on: 02
