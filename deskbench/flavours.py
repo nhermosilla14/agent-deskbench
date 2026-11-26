@@ -32,9 +32,11 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _WHITESPACE = re.compile(r"\s")
 _FLAVOUR_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$")
 
-_MANIFEST_KEYS = frozenset({"image", "summary", "viewer", "run"})
+_MANIFEST_KEYS = frozenset({"image", "summary", "viewer", "run", "screenshot"})
 _VIEWER_KEYS = frozenset({"port", "path", "scheme", "timeout"})
 _RUN_KEYS = frozenset({"user", "entrypoint", "command", "env"})
+_SCREENSHOT_KEYS = frozenset({"command", "settle"})
+CAPTURE_COMMAND = ("/usr/local/bin/deskbench-capture", "{output}", "{settle}")
 _SCHEMES = ("http", "https")
 _MAX_ID = 2**31 - 1
 
@@ -99,6 +101,19 @@ class Run:
 
 
 @dataclass(frozen=True)
+class Screenshot:
+    """How to capture a desktop's screen.
+
+    ``command`` is an argv with ``{output}`` and ``{settle}`` placeholders. ``settle`` says
+    whether ``shot`` should capture until two frames match; ``None`` uses the manifest default.
+    A flavour without a command resolves one of the tools the image is known to ship.
+    """
+
+    command: tuple[str, ...] | None = None
+    settle: bool | None = None
+
+
+@dataclass(frozen=True)
 class Flavour:
     """One flavour: the name a caller uses, the image it starts and its desktop contract."""
 
@@ -108,6 +123,7 @@ class Flavour:
     source: str = "builtin"
     viewer: Viewer = field(default_factory=Viewer)
     run: Run = field(default_factory=Run)
+    screenshot: Screenshot = field(default_factory=Screenshot)
 
 
 @dataclass(frozen=True)
@@ -197,6 +213,7 @@ def _builtin(name: str) -> Flavour:
         name=name,
         summary=summary,
         image=f"{registry()}/{image_name}:{TAG_VERSION}",
+        screenshot=Screenshot(command=CAPTURE_COMMAND, settle=False),
     )
 
 
@@ -350,6 +367,46 @@ def _run(table: dict[str, object]) -> Run:
     )
 
 
+def _screenshot(table: dict[str, object]) -> Screenshot:
+    """Validate ``[screenshot]``: an argv with ``{output}`` and an optional settle flag."""
+    command = table.get("command")
+    settle = table.get("settle")
+
+    if command is None:
+        if settle is not None:
+            raise ManifestError(
+                "'screenshot.settle' requires 'screenshot.command'; "
+                "set a command or remove settle"
+            )
+        return Screenshot()
+
+    if not isinstance(command, list):
+        raise ManifestError(
+            f"'screenshot.command' must be a list of strings, not {type(command).__name__}"
+        )
+    if not command:
+        raise ManifestError("'screenshot.command' must not be empty")
+    for index, item in enumerate(command):
+        if not isinstance(item, str):
+            raise ManifestError(
+                f"'screenshot.command[{index}]' must be a string, not {type(item).__name__}"
+            )
+        if not item:
+            raise ManifestError(f"'screenshot.command[{index}]' must not be empty")
+    if not any("{output}" in item for item in command):
+        raise ManifestError(
+            "'screenshot.command' must contain '{output}' so the capture knows where to write"
+        )
+
+    if settle is None:
+        settle = True
+    elif not isinstance(settle, bool):
+        raise ManifestError(
+            f"'screenshot.settle' must be a boolean, not {type(settle).__name__}"
+        )
+    return Screenshot(command=tuple(command), settle=settle)
+
+
 def _read_manifest(name: str, path: Path) -> Flavour:
     """Parse and validate one manifest into a complete user flavour.
 
@@ -369,7 +426,7 @@ def _read_manifest(name: str, path: Path) -> Flavour:
         keys = ", ".join(repr(key) for key in unknown)
         raise ManifestError(
             f"unknown key{'s' if len(unknown) > 1 else ''} {keys}; "
-            "this version accepts only 'image', 'summary', 'viewer' and 'run'"
+            "this version accepts only 'image', 'summary', 'viewer', 'run' and 'screenshot'"
         )
     if "image" not in document:
         raise ManifestError("missing required key 'image'")
@@ -393,6 +450,7 @@ def _read_manifest(name: str, path: Path) -> Flavour:
         source="user",
         viewer=_viewer(_table(document, "viewer", _VIEWER_KEYS)),
         run=_run(_table(document, "run", _RUN_KEYS)),
+        screenshot=_screenshot(_table(document, "screenshot", _SCREENSHOT_KEYS)),
     )
 
 

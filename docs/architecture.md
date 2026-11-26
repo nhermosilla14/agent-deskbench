@@ -29,10 +29,12 @@ version.
 
 There is no local state. `podman ps --filter label=deskbench=1` is the list of desktops and the
 container name is the desktop name. The container also carries the resolved contract as labels:
-`deskbench.viewer.port`, `deskbench.viewer.path`, `deskbench.viewer.scheme` and
-`deskbench.run.user`. `ls`, `url` and `exec` read them, so a manifest edited later cannot mutate a
-running desktop. Containers without those labels fall back to the built-in layout (port 6080, the
-noVNC path, `http`, user `1000:1000`).
+`deskbench.viewer.port`, `deskbench.viewer.path`, `deskbench.viewer.scheme`,
+`deskbench.screenshot` (compact JSON with `command` and `settle`) and `deskbench.run.user`. `ls`,
+`url`, `exec` and `shot` read them, so a manifest edited later cannot mutate a running desktop.
+Containers without those labels fall back to the built-in layout (port 6080, the noVNC path,
+`http`, user `1000:1000`) and, for screenshots, to probing the image for `deskbench-capture`,
+`scrot` or `import`.
 
 ## Images
 
@@ -43,12 +45,15 @@ pulls a missing reference and never builds. `image/` and `image/flavours/*` are 
 
 User flavours live in `$XDG_CONFIG_HOME/agent-deskbench/flavours/<name>/flavour.toml` (default
 `~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference,
-an optional summary, and optional `[viewer]` and `[run]` tables describing a third-party image's
-contract: `port`, `path`, `scheme` and `timeout` for the viewer; `user`, `entrypoint`, `command` and
-`env` for the process, with `{width}`/`{height}` substituted from `--size`. Unknown keys and invalid
-values are errors. `flavours.discover()` merges valid manifests with the built-ins for `images`,
-reporting bad candidates as problems, and `get()` resolves a user name at `new` time. A directory
-that shadows a built-in is an error.
+an optional summary, and optional `[viewer]`, `[run]` and `[screenshot]` tables describing a
+third-party image's contract: `port`, `path`, `scheme` and `timeout` for the viewer; `user`,
+`entrypoint`, `command` and `env` for the process, with `{width}`/`{height}` substituted from
+`--size`; and a capture `command` with `{output}`/`{settle}` placeholders plus a `settle` flag. A
+command-less flavour resolves `deskbench-capture`, `scrot` or `import` from the image. `new` probes
+the shell and the screenshot before reporting success and removes the container when either fails.
+`flavours.discover()` merges valid manifests with the built-ins for `images`, reporting bad
+candidates as problems, and `get()` resolves a user name at `new` time. A directory that shadows a
+built-in is an error.
 
 ## Module map
 

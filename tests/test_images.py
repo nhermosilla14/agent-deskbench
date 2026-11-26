@@ -252,6 +252,38 @@ entrypoint = ["/usr/local/bin/adapter-entrypoint"]
 env = { ADAPTER_MARKER = "from-manifest", ADAPTER_SIZE = "{width}x{height}" }
 """
 
+ADAPTER_SCREENSHOT_MANIFEST = """\
+image = "localhost/agent-deskbench/adapter-fixture:1"
+summary = "Adapter fixture with a custom screenshot command"
+
+[viewer]
+port = 3000
+path = "/"
+
+[run]
+entrypoint = ["/usr/local/bin/adapter-entrypoint"]
+
+[screenshot]
+command = ["/usr/local/bin/adapter-shot", "{output}"]
+settle = false
+"""
+
+ADAPTER_BAD_SCREENSHOT_MANIFEST = """\
+image = "localhost/agent-deskbench/adapter-fixture:1"
+summary = "Adapter fixture whose screenshot always fails"
+
+[viewer]
+port = 3000
+path = "/"
+
+[run]
+entrypoint = ["/usr/local/bin/adapter-entrypoint"]
+
+[screenshot]
+command = ["/bin/false", "{output}"]
+settle = false
+"""
+
 
 class Adapter(unittest.TestCase):
     """A third-party image with its own viewer, entrypoint, environment and port is usable."""
@@ -589,11 +621,65 @@ class CommandLine(unittest.TestCase):
             image=self.image,
             source="user",
             run=flavours.Run(entrypoint=("/bin/init", "--fast"), command=("serve", "3000")),
+            screenshot=flavours.Screenshot(command=("/usr/bin/shot", "{output}")),
         )
         args = self.run_args(flavour)
         entrypoint = args.index("--entrypoint")
         self.assertEqual(args[entrypoint + 1], "/bin/init")
+        # The label is before the image; entrypoint arguments and the command follow it.
         self.assertEqual(args[-4:], [self.image, "--fast", "serve", "3000"])
+
+    def test_a_user_screenshot_command_becomes_a_compact_label(self):
+        command = ("/usr/local/bin/adapter-shot", "{output}")
+        flavour = flavours.Flavour(
+            name="adapter",
+            summary="",
+            image=self.image,
+            source="user",
+            screenshot=flavours.Screenshot(command=command, settle=False),
+        )
+        expected = "deskbench.screenshot=" + json.dumps(
+            {"command": list(command), "settle": False}, separators=(",", ":"),
+        )
+        self.assertIn(expected, self.run_args(flavour))
+
+    def test_a_screenshot_command_without_settle_is_labelled_as_settled(self):
+        command = ("/usr/bin/shot", "{output}")
+        flavour = flavours.Flavour(
+            name="adapter",
+            summary="",
+            image=self.image,
+            source="user",
+            screenshot=flavours.Screenshot(command=command),
+        )
+        expected = "deskbench.screenshot=" + json.dumps(
+            {"command": list(command), "settle": True}, separators=(",", ":"),
+        )
+        self.assertIn(expected, self.run_args(flavour))
+
+    def test_a_builtin_screenshot_command_is_labelled_with_settle_false(self):
+        command = ("/usr/local/bin/deskbench-capture", "{output}", "{settle}")
+        flavour = flavours.Flavour(
+            name="base",
+            summary="",
+            image=self.image,
+            source="builtin",
+            screenshot=flavours.Screenshot(command=command, settle=False),
+        )
+        expected = "deskbench.screenshot=" + json.dumps(
+            {"command": list(command), "settle": False}, separators=(",", ":"),
+        )
+        self.assertIn(expected, self.run_args(flavour))
+
+    def test_a_flavour_without_a_screenshot_command_omits_the_label(self):
+        flavour = flavours.Flavour(
+            name="adapter", summary="", image=self.image, source="user",
+        )
+        args = self.run_args(flavour)
+        self.assertFalse(
+            [value for value in args if value.startswith("deskbench.screenshot=")],
+            "a command-less flavour must let shot resolve the image's own tool",
+        )
 
     def test_command_alone_needs_no_entrypoint(self):
         flavour = flavours.Flavour(
@@ -704,6 +790,352 @@ class ContractProbe(unittest.TestCase):
                 engine.create("demo", "800x600", flavours.adhoc(self.image))
         invocations = [entry.args[0] for entry in calls.call_args_list]
         self.assertIn(["stop", "--time", "2", "deskbench-demo"], invocations)
+
+    def test_a_failing_screenshot_command_is_an_error_naming_the_capability(self):
+        flavour = flavours.Flavour(
+            name="bad-shot", summary="", image=self.image, source="user",
+            screenshot=flavours.Screenshot(
+                command=("/bin/false", "{output}"), settle=False,
+            ),
+        )
+        desktop = engine.Desktop(
+            name="demo", container="deskbench-demo", state="running",
+            url="http://127.0.0.1:6080/", id="abc",
+        )
+        runtime = runtimes.Runtime(name="podman", binary="podman")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        failed = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="capture broke",
+        )
+
+        def podman(args, **kwargs):
+            if args[0] == "exec" and args[-1] == "true":
+                return ok
+            if args[0] == "exec":
+                return failed
+            return ok
+
+        with mock.patch.object(engine, "image_exists", return_value=True), \
+                mock.patch.object(engine, "_podman", side_effect=podman) as calls, \
+                mock.patch.object(engine.runtimes, "detect", return_value=runtime), \
+                mock.patch.object(engine, "get", return_value=desktop), \
+                mock.patch.object(engine, "wait_ready", return_value=desktop), \
+                mock.patch.object(engine.time, "sleep"):
+            with self.assertRaises(engine.EngineError) as caught:
+                engine.create("demo", "800x600", flavour)
+
+        message = str(caught.exception)
+        self.assertIn("bad-shot", message)
+        self.assertIn("screenshot", message)
+        self.assertIn("capture broke", message)
+        invocations = [entry.args[0] for entry in calls.call_args_list]
+        self.assertIn(["stop", "--time", "2", "deskbench-demo"], invocations)
+        attempts = [
+            invocation for invocation in invocations
+            if invocation[0] == "exec" and invocation[-1] != "true"
+        ]
+        self.assertEqual(len(attempts), 3, "the probe should retry before refusing")
+
+    def test_a_flavour_with_no_known_tool_is_refused_and_cleaned_up(self):
+        desktop = engine.Desktop(
+            name="demo", container="deskbench-demo", state="running",
+            url="http://127.0.0.1:6080/", id="abc",
+        )
+        runtime = runtimes.Runtime(name="podman", binary="podman")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        missing = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="")
+
+        def podman(args, **kwargs):
+            if args[0] == "exec" and args[-1] == "true":
+                return ok
+            if args[0] == "exec" and args[-1].startswith("command -v"):
+                return missing
+            return ok
+
+        with mock.patch.object(engine, "image_exists", return_value=True), \
+                mock.patch.object(engine, "_podman", side_effect=podman) as calls, \
+                mock.patch.object(engine.runtimes, "detect", return_value=runtime), \
+                mock.patch.object(engine, "get", return_value=desktop), \
+                mock.patch.object(engine, "wait_ready", return_value=desktop):
+            with self.assertRaises(engine.EngineError) as caught:
+                engine.create("demo", "800x600", flavours.adhoc(self.image))
+
+        message = str(caught.exception)
+        self.assertIn("image", message)
+        self.assertIn("screenshot", message)
+        self.assertIn("[screenshot].command", message)
+        invocations = [entry.args[0] for entry in calls.call_args_list]
+        self.assertIn(["stop", "--time", "2", "deskbench-demo"], invocations)
+
+        probes = [
+            invocation for invocation in invocations
+            if invocation[0] == "exec" and invocation[-1].startswith("command -v")
+        ]
+        self.assertEqual(
+            [probe[-1] for probe in probes],
+            ["command -v deskbench-capture", "command -v scrot", "command -v import"],
+        )
+
+
+class ScreenshotCommand(unittest.TestCase):
+    """Placeholder substitution, the tool fallback chain and the label contract."""
+
+    desktop = engine.Desktop(
+        name="demo", container="deskbench-demo", state="running", url="", id="abc",
+    )
+
+    def test_placeholders_are_substituted_and_other_text_survives(self):
+        self.assertEqual(
+            engine._substitute_capture(
+                ("tool", "{output}", "{settle}", "a{other}"), "/tmp/x.png", 250,
+            ),
+            ["tool", "/tmp/x.png", "250", "a{other}"],
+        )
+
+    def test_a_configured_command_wins_without_probing(self):
+        with mock.patch.object(engine, "_podman") as podman:
+            resolved = engine._resolve_screenshot(
+                self.desktop,
+                flavours.Screenshot(command=("tool", "{output}"), settle=False),
+                "1000:1000",
+            )
+        self.assertEqual(resolved, (("tool", "{output}"), False))
+        podman.assert_not_called()
+
+    def test_the_fallback_chain_returns_the_first_tool_found(self):
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        missing = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="")
+
+        def podman(args, **kwargs):
+            return ok if args[-1] == "command -v scrot" else missing
+
+        with mock.patch.object(engine, "_podman", side_effect=podman) as calls:
+            resolved = engine._resolve_screenshot(self.desktop, None, "1000:1000")
+        self.assertEqual(resolved, (("scrot", "-o", "{output}"), True))
+        self.assertEqual(
+            [call.args[0][-1] for call in calls.call_args_list],
+            ["command -v deskbench-capture", "command -v scrot"],
+        )
+
+
+class Settle(unittest.TestCase):
+    """``shot`` with settle stops at two identical frames and is bounded when it never does."""
+
+    desktop = engine.Desktop(
+        name="demo",
+        container="deskbench-demo",
+        state="running",
+        url="",
+        id="abc",
+        labels={"deskbench.run.user": "1000:1000"},
+    )
+
+    def run_shot(self, frames: list[bytes]) -> tuple[bytes, dict[str, int], list[Path], str]:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        destination = root / "out.png"
+        created: list[Path] = []
+
+        def mkstemp(**kwargs):
+            path = root / f"frame-{len(created)}.png"
+            fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+            created.append(path)
+            return fd, str(path)
+
+        state = {"captures": 0, "copies": 0}
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        label = json.dumps({"command": ["/usr/bin/shot", "{output}"], "settle": True})
+
+        def podman(args, **kwargs):
+            if args[0] == "inspect":
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout=label, stderr="",
+                )
+            if args[0] == "exec":
+                state["captures"] += 1
+                return ok
+            if args[0] == "cp":
+                Path(args[2]).write_bytes(frames[state["copies"]])
+                state["copies"] += 1
+                return ok
+            return ok
+
+        err = io.StringIO()
+        with mock.patch.object(engine, "get", return_value=self.desktop), \
+                mock.patch.object(engine, "_podman", side_effect=podman), \
+                mock.patch.object(engine.tempfile, "mkstemp", side_effect=mkstemp), \
+                mock.patch.object(engine.time, "sleep"), \
+                contextlib.redirect_stderr(err):
+            result = engine.shot("demo", destination, settle_ms=1)
+        self.assertEqual(result, destination)
+        return destination.read_bytes(), state, created, err.getvalue()
+
+    def test_two_identical_frames_end_the_loop(self):
+        data, state, created, err = self.run_shot([b"a", b"b", b"b"])
+        self.assertEqual(data, b"b")
+        self.assertEqual(state["captures"], 3)
+        self.assertEqual(err, "")
+        for frame in created:
+            self.assertFalse(frame.exists(), "host frames must be cleaned up")
+
+    def test_a_screen_that_never_settles_is_bounded_and_warns(self):
+        frames = [bytes([index]) for index in range(10)]
+        data, state, created, err = self.run_shot(frames)
+        self.assertEqual(data, frames[-1])
+        self.assertEqual(state["captures"], 10)
+        self.assertIn("did not settle", err)
+        for frame in created:
+            self.assertFalse(frame.exists(), "host frames must be cleaned up")
+
+
+class AdapterScreenshot(unittest.TestCase):
+    """A third-party image's own screenshot command, its failure, and the built-in fallback."""
+
+    desktop = "e2e-adapter-shot"
+    fallback_desktop = "e2e-adapter-fallback"
+    bad_desktop = "e2e-adapter-bad"
+    flavour = "adapter-shot"
+    fallback_flavour = "adapter-fallback"
+    bad_flavour = "adapter-bad"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        reason = e2e_skip_reason()
+        if reason:
+            raise unittest.SkipTest(reason)
+        cls.registry = os.environ["DESKBENCH_REGISTRY"]
+        cls.base_image = f"{cls.registry}/desktop:1"
+        if not engine.image_exists(cls.base_image):
+            raise unittest.SkipTest(
+                f"{cls.base_image} is absent; build it with `task image` first"
+            )
+        if not engine.image_exists(ADAPTER_IMAGE):
+            try:
+                subprocess.run(
+                    ["podman", "build", "-t", ADAPTER_IMAGE, "tests/fixtures/adapter"],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise unittest.SkipTest(
+                    f"could not build the adapter fixture: {exc.stderr.strip()}"
+                ) from exc
+
+        cls._tempdir = tempfile.TemporaryDirectory()
+        directory = Path(cls._tempdir.name)
+        manifests = {
+            cls.flavour: ADAPTER_SCREENSHOT_MANIFEST,
+            cls.bad_flavour: ADAPTER_BAD_SCREENSHOT_MANIFEST,
+            cls.fallback_flavour: (
+                f'image = "{cls.base_image}"\nsummary = "Base image with the fallback"\n'
+            ),
+        }
+        for name, body in manifests.items():
+            (directory / name).mkdir()
+            (directory / name / "flavour.toml").write_text(body, encoding="utf-8")
+
+        cls._env = mock.patch.dict(
+            os.environ, {"DESKBENCH_FLAVOURS_DIR": str(directory)}
+        )
+        cls._env.start()
+        try:
+            for name in (cls.desktop, cls.fallback_desktop, cls.bad_desktop):
+                call("stop", name)
+            code, out, err = call(
+                "new", "--name", cls.desktop, "--size", "800x600",
+                "--flavour", cls.flavour,
+            )
+            if code != 0:
+                raise unittest.SkipTest(
+                    f"could not start {cls.desktop}: {err.strip() or out.strip()}"
+                )
+            cls.created = json.loads(out)
+
+            code, out, err = call(
+                "new", "--name", cls.fallback_desktop, "--size", "800x600",
+                "--flavour", cls.fallback_flavour,
+            )
+            if code != 0:
+                raise unittest.SkipTest(
+                    f"could not start {cls.fallback_desktop}: "
+                    f"{err.strip() or out.strip()}"
+                )
+            cls.fallback_created = json.loads(out)
+        except BaseException:
+            cls._cleanup()
+            raise
+
+    @classmethod
+    def _cleanup(cls) -> None:
+        for name in (cls.desktop, cls.fallback_desktop, cls.bad_desktop):
+            call("stop", name)
+        cls._tempdir.cleanup()
+        cls._env.stop()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._cleanup()
+
+    def shot(self, desktop: str) -> Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        destination = Path(directory.name) / "shot.png"
+        code, out, err = call("shot", desktop, "-o", str(destination))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), str(destination))
+        data = destination.read_bytes()
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertGreater(len(data), 8)
+        return destination
+
+    def labels(self, container_id: str) -> dict[str, str]:
+        result = subprocess.run(
+            ["podman", "inspect", "--format", "{{json .Config.Labels}}", container_id],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_custom_screenshot_command(self):
+        self.shot(self.desktop)
+        labels = self.labels(self.created["id"])
+        self.assertEqual(
+            json.loads(labels["deskbench.screenshot"]),
+            {
+                "command": ["/usr/local/bin/adapter-shot", "{output}"],
+                "settle": False,
+            },
+        )
+
+    def test_unviable_screenshot_command_is_refused(self):
+        code, out, err = call(
+            "new", "--name", self.bad_desktop, "--size", "800x600",
+            "--flavour", self.bad_flavour,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "", "a failed new must not print a desktop JSON")
+        self.assertIn(self.bad_flavour, err)
+        self.assertIn("screenshot", err)
+
+        code, out, err = call("ls", "--json")
+        self.assertEqual(code, 0, err)
+        names = {row["name"] for row in json.loads(out)}
+        self.assertNotIn(self.bad_desktop, names)
+
+        result = subprocess.run(
+            ["podman", "container", "exists", f"deskbench-{self.bad_desktop}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertNotEqual(result.returncode, 0, "a refused desktop left a container behind")
+
+    def test_default_capture_helper_is_the_fallback(self):
+        self.shot(self.fallback_desktop)
+        labels = self.labels(self.fallback_created["id"])
+        self.assertNotIn("deskbench.screenshot", labels)
 
 
 if __name__ == "__main__":

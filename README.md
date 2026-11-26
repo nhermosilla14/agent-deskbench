@@ -101,14 +101,22 @@ user = "1000:1000"
 entrypoint = ["/usr/local/bin/my-entrypoint"]
 command = ["--flag"]
 env = { MY_SIZE = "{width}x{height}" }   # {width}/{height} come from --size
+
+[screenshot]                # how `shot` captures the screen
+command = ["/usr/local/bin/my-shot", "{output}"]  # {output} required; {settle} optional
+settle = true               # capture until two frames match (default: true for custom commands)
 ```
 
 `new` publishes the configured viewer port, waits for that scheme and path (2xx, 3xx, 401 or 403),
-and records the effective port, path, scheme and user as container labels, so `ls`, `url` and `exec`
-keep the configuration the desktop started with even if the manifest changes later. `exec` runs as
-the configured user. `new` refuses an image whose `sh` cannot run a command and removes the
-container. Unknown keys and out-of-range values are errors, so a typo cannot fall back to a
-default.
+and records the effective port, path, scheme, user and screenshot command as container labels, so
+`ls`, `url`, `exec` and `shot` keep the configuration the desktop started with even if the manifest
+changes later. Before reporting success, `new` proves the contract inside the container: `sh -lc
+true` must succeed and the screenshot command must write a non-empty file. If either probe fails,
+`new` removes the container and exits 1 naming the flavour and the missing capability. A
+command-less flavour — including a bare `--image` — probes for `deskbench-capture`, `scrot` or
+`import`, in that order. `shot` runs the recorded command once when `settle = false`, or captures
+until two consecutive frames match, bounded in time, when `settle = true`. Unknown keys and
+out-of-range values are errors, so a typo cannot fall back to a default.
 
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 

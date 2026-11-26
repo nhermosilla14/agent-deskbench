@@ -402,6 +402,28 @@ class Defaults(unittest.TestCase):
         self.assertEqual(run.command, ())
         self.assertEqual(run.env, {})
 
+    def test_screenshot_defaults_leave_resolution_to_the_runtime(self):
+        screenshot = flavours.Screenshot()
+        self.assertIsNone(screenshot.command)
+        self.assertIsNone(screenshot.settle)
+
+    def test_builtins_use_the_builtin_capture_helper(self):
+        with registry_env(None):
+            for name in flavours.names():
+                with self.subTest(flavour=name):
+                    flavour = flavours.get(name)
+                    self.assertEqual(
+                        flavour.screenshot,
+                        flavours.Screenshot(
+                            command=(
+                                "/usr/local/bin/deskbench-capture",
+                                "{output}",
+                                "{settle}",
+                            ),
+                            settle=False,
+                        ),
+                    )
+
     def test_builtins_use_the_default_contract(self):
         with registry_env(None):
             for name in flavours.names():
@@ -418,6 +440,7 @@ class Defaults(unittest.TestCase):
         self.assertEqual(flavour.source, "image")
         self.assertEqual(flavour.viewer, flavours.Viewer())
         self.assertEqual(flavour.run, flavours.Run())
+        self.assertEqual(flavour.screenshot, flavours.Screenshot())
 
     def test_adhoc_validates_the_reference(self):
         with self.assertRaises(flavours.InvalidImage) as caught:
@@ -515,7 +538,10 @@ class Schema(unittest.TestCase):
         cases = {
             "viewer": ('[viewer]\ncolour = "blue"\n', "colour"),
             "run": ('[run]\ncwd = "/"\n', "cwd"),
-            "top": ('[screenshot]\ncommand = ["x"]\n', "screenshot"),
+            "screenshot": (
+                '[screenshot]\ncommand = ["/bin/shot", "{output}"]\nformat = "png"\n',
+                "format",
+            ),
         }
         for label, (body, key) in cases.items():
             with self.subTest(table=label):
@@ -588,12 +614,74 @@ class Schema(unittest.TestCase):
                 self.assertIn("run.env.A", message)
                 self.assertIn("must be a string", message)
 
-    def test_a_screenshot_table_is_still_unknown(self):
-        message = self.error(
-            f'image = "{IMAGE}"\n[screenshot]\nsettle = false\n'
+    def test_a_screenshot_command_defaults_to_settle(self):
+        self.write(
+            f'image = "{IMAGE}"\n'
+            "[screenshot]\n"
+            'command = ["/usr/bin/shot", "{output}"]\n'
         )
-        self.assertIn("unknown key", message)
-        self.assertIn("screenshot", message)
+        self.assertEqual(
+            flavours.get("custom").screenshot,
+            flavours.Screenshot(command=("/usr/bin/shot", "{output}"), settle=True),
+        )
+
+    def test_an_explicit_screenshot_settle_is_kept(self):
+        self.write(
+            f'image = "{IMAGE}"\n'
+            "[screenshot]\n"
+            'command = ["/usr/bin/shot", "{output}", "{settle}"]\n'
+            "settle = false\n"
+        )
+        self.assertEqual(
+            flavours.get("custom").screenshot,
+            flavours.Screenshot(
+                command=("/usr/bin/shot", "{output}", "{settle}"), settle=False,
+            ),
+        )
+
+    def test_a_screenshot_command_must_have_an_output_placeholder(self):
+        message = self.error(
+            f'image = "{IMAGE}"\n[screenshot]\ncommand = ["/usr/bin/shot"]\n'
+        )
+        self.assertIn("{output}", message)
+        self.assertIn("screenshot.command", message)
+
+    def test_a_screenshot_command_must_be_a_list(self):
+        message = self.error(
+            f'image = "{IMAGE}"\n[screenshot]\ncommand = "/usr/bin/shot {{output}}"\n'
+        )
+        self.assertIn("screenshot.command", message)
+        self.assertIn("must be a list", message)
+
+    def test_screenshot_command_items_must_be_non_empty_strings(self):
+        cases = (
+            ('command = [1, "{output}"]\n', "must be a string"),
+            ('command = ["", "{output}"]\n', "must not be empty"),
+            ("command = []\n", "must not be empty"),
+        )
+        for body, expected in cases:
+            with self.subTest(body=body):
+                message = self.error(f'image = "{IMAGE}"\n[screenshot]\n{body}')
+                self.assertIn("screenshot.command", message)
+                self.assertIn(expected, message)
+
+    def test_a_screenshot_settle_must_be_a_boolean(self):
+        for value in ('"yes"', "1"):
+            with self.subTest(value=value):
+                message = self.error(
+                    f'image = "{IMAGE}"\n'
+                    "[screenshot]\n"
+                    'command = ["/usr/bin/shot", "{output}"]\n'
+                    f"settle = {value}\n"
+                )
+                self.assertIn("screenshot.settle", message)
+                self.assertIn("must be a boolean", message)
+
+    def test_a_screenshot_settle_requires_a_command(self):
+        message = self.error(f'image = "{IMAGE}"\n[screenshot]\nsettle = false\n')
+        self.assertIn("screenshot.settle", message)
+        self.assertIn("screenshot.command", message)
+        self.assertIn("requires", message)
 
 
 if __name__ == "__main__":

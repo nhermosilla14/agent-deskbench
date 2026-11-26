@@ -17,6 +17,7 @@ DEFAULT_VIEWER_PATH = "/vnc.html?autoconnect=1&resize=scale"
 VIEWER_PORT_LABEL = "deskbench.viewer.port"
 VIEWER_PATH_LABEL = "deskbench.viewer.path"
 VIEWER_SCHEME_LABEL = "deskbench.viewer.scheme"
+SCREENSHOT_LABEL = "deskbench.screenshot"
 RUN_USER_LABEL = "deskbench.run.user"
 
 _NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$")
