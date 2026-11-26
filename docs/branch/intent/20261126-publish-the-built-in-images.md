@@ -1,6 +1,6 @@
 # Publish the built-in images to GHCR
 
-- Status: Accepted
+- Status: In progress
 - Date: 2026-11-26
 - Owner: Nicolás Hermosilla Polanco
 - Approved by: Nicolás Hermosilla Polanco

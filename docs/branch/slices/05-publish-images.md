@@ -1,5 +1,6 @@
 # Publish the built-in images to GHCR
 
+- Status: Done
 - Intents: 20261126-publish-the-built-in-images
 - ADRs: 20261126-publish-images-to-ghcr
 - Depends on: 01

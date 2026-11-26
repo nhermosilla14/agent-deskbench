@@ -55,6 +55,16 @@ the shell and the screenshot before reporting success and removes the container 
 candidates as problems, and `get()` resolves a user name at `new` time. A directory that shadows a
 built-in is an error.
 
+## Publishing
+
+A release publishes the built-ins. `.github/workflows/publish.yml` runs on `v*` tags and manual
+dispatch; it logs in with `GITHUB_TOKEN` (`packages: write`), derives the tags with
+`scripts/image-tags.sh`, and pushes the base then Firefox and Chromium with `BASE` set to it. Each
+image gets `:X.Y.Z`, `:X.Y`, `:X`, `:latest` and `:sha-<short>`; `:X` is the moving major line the
+CLI resolves. Pull requests touching `image/**` or the publish scripts build all three without
+pushing. `task publish REGISTRY=... VERSION=...` does the same locally through Podman. The mapping
+lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the tests.
+
 ## Module map
 
 | Module | Role |

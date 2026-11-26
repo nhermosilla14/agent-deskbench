@@ -1,0 +1,95 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - "image/**"
+      - ".github/workflows/publish.yml"
+      - "scripts/image-tags.sh"
+      - "scripts/publish-images.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all three images without pushing
+        run: |
+          set -euo pipefail
+          docker build -t localhost/agent-deskbench/desktop:ci image
+          docker build \
+            --build-arg BASE=localhost/agent-deskbench/desktop:ci \
+            -t localhost/agent-deskbench/desktop-firefox:ci \
+            image/flavours/firefox
+          docker build \
+            --build-arg BASE=localhost/agent-deskbench/desktop:ci \
+            -t localhost/agent-deskbench/desktop-chromium:ci \
+            image/flavours/chromium
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the release version and tags
+        id: tags
+        env:
+          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${REQUESTED#v}"
+          ./scripts/image-tags.sh "$version" "$(git rev-parse --short HEAD)" \
+            > "$RUNNER_TEMP/tags"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push the three images
+        run: |
+          set -euo pipefail
+          registry="ghcr.io/nhermosilla14/agent-deskbench"
+          version="${{ steps.tags.outputs.version }}"
+          tags="$RUNNER_TEMP/tags"
+
+          build_push() {
+            name=$1
+            context=$2
+            base=${3:-}
+            image="$registry/$name:$version"
+            if [ -n "$base" ]; then
+              docker build --build-arg "BASE=$base" -t "$image" "$context"
+            else
+              docker build -t "$image" "$context"
+            fi
+            while IFS= read -r tag; do
+              docker tag "$image" "$registry/$name:$tag"
+              docker push "$registry/$name:$tag"
+            done < "$tags"
+          }
+
+          build_push desktop image
+          build_push desktop-firefox image/flavours/firefox "$registry/desktop:$version"
+          build_push desktop-chromium image/flavours/chromium "$registry/desktop:$version"

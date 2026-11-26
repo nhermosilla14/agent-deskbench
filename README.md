@@ -26,12 +26,12 @@ sudo apt install podman python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.
 ```sh
 git clone git@github.com:nhermosilla14/agent-deskbench.git
 cd agent-deskbench
-task image          # build the three images locally for development
-python3 -m deskbench new --name alpha --size 1600x1000
+python3 -m deskbench new --name alpha --size 1600x1000   # pulls the base image on first use
 ```
 
 `new` prints JSON with the desktop name, its viewer URL and the container id. Open the URL in a
-browser, or click the tray icon and choose *Open viewer*.
+browser, or click the tray icon and choose *Open viewer*. The first run pulls the image; `task image`
+builds the three images locally if you prefer to avoid the pull.
 
 ## Usage
 
@@ -118,6 +118,23 @@ command-less flavour — including a bare `--image` — probes for `deskbench-ca
 until two consecutive frames match, bounded in time, when `settle = true`. Unknown keys and
 out-of-range values are errors, so a typo cannot fall back to a default.
 
+#### Publishing images
+
+Releases publish the three built-ins to GHCR. Tag the repository `vX.Y.Z`; the `publish` workflow
+builds the base, then Firefox and Chromium on top of it, and pushes `:X.Y.Z`, `:X.Y`, `:X`,
+`:latest` and `:sha-<short>` for each. The major tag (`:1` today) is what the built-in flavours pull.
+From a checkout:
+
+```sh
+task publish VERSION=1.2.3
+task publish REGISTRY=ghcr.io/you/agent-deskbench VERSION=1.2.3
+```
+
+`scripts/image-tags.sh` is the single source of the tag list. Pull requests touching `image/` build
+all three without pushing. GHCR packages are private by default even for a public repository: open
+each package's settings and make it public after the first release (one-time). Until then,
+`podman login ghcr.io` is required.
+
 The CLI is the only supported entry point for creating desktops. The tray only observes.
 
 Built-in images run everything as the unprivileged user `agent` (uid 1000), not root, so
@@ -133,7 +150,7 @@ agent-deskbench/
 ├── image/                    container images: TigerVNC + openbox + noVNC, plus flavour builds
 ├── deskbench/                the CLI, the engine wrapper and the tray
 ├── tests/                    end-to-end tests through the CLI
-├── scripts/                  branch-docs merge gate
+├── scripts/                  branch-docs merge gate and image publishing
 └── .agents/skills/           the vendored general-software-development skill
 ```
 
@@ -154,6 +171,7 @@ task test        # python3 -m unittest discover -s tests
 task e2e         # container-backed tests (builds the three images, starts desktops)
 task lint        # python3 -m compileall + branch-docs check
 task image       # rebuild the three images
+task publish VERSION=1.2.3   # build and push the three images to GHCR
 ```
 
 Environment variables for automation:

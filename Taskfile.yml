@@ -1,10 +1,10 @@
 version: "3"
 
 vars:
-  REGISTRY: localhost/agent-deskbench
-  IMAGE: "{{.REGISTRY}}/desktop:1"
-  FIREFOX_IMAGE: "{{.REGISTRY}}/desktop-firefox:1"
-  CHROMIUM_IMAGE: "{{.REGISTRY}}/desktop-chromium:1"
+  LOCAL_REGISTRY: localhost/agent-deskbench
+  IMAGE: "{{.LOCAL_REGISTRY}}/desktop:1"
+  FIREFOX_IMAGE: "{{.LOCAL_REGISTRY}}/desktop-firefox:1"
+  CHROMIUM_IMAGE: "{{.LOCAL_REGISTRY}}/desktop-chromium:1"
 
 tasks:
   default:
@@ -21,7 +21,7 @@ tasks:
     desc: Build the three images and run the container-backed suite against them
     deps: [image]
     cmds:
-      - DESKBENCH_E2E=1 DESKBENCH_REGISTRY={{.REGISTRY}} python3 -m unittest discover -s tests -v
+      - DESKBENCH_E2E=1 DESKBENCH_REGISTRY={{.LOCAL_REGISTRY}} python3 -m unittest discover -s tests -v
 
   lint:
     desc: Syntax check plus the branch-docs merge gate
@@ -35,6 +35,13 @@ tasks:
       - podman build -t {{.IMAGE}} image
       - podman build --build-arg BASE={{.IMAGE}} -t {{.FIREFOX_IMAGE}} image/flavours/firefox
       - podman build --build-arg BASE={{.IMAGE}} -t {{.CHROMIUM_IMAGE}} image/flavours/chromium
+
+  publish:
+    desc: Build and push the three images (REGISTRY=..., VERSION=...)
+    requires:
+      vars: [VERSION]
+    cmds:
+      - ./scripts/publish-images.sh {{.REGISTRY | default "ghcr.io/nhermosilla14/agent-deskbench"}} {{.VERSION}}
 
   install-cli:
     desc: Install the deskbench command into ~/.local/bin (editable, via uv)
