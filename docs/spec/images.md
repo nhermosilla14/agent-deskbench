@@ -90,7 +90,13 @@ reporting success.
     screenshot tool is refused.
   - The built-in images use `/usr/local/bin/deskbench-capture {output} {settle}` with
     `settle = false`.
-- Tests: tests.test_images.ContractProbe.test_a_missing_shell_is_an_error_naming_the_flavour, tests.test_images.ContractProbe.test_the_shell_probe_runs_as_the_configured_user, tests.test_images.ContractProbe.test_a_failing_screenshot_command_is_an_error_naming_the_capability, tests.test_images.ContractProbe.test_a_flavour_with_no_known_tool_is_refused_and_cleaned_up, tests.test_images.ContractProbe.test_a_failed_new_leaves_no_container, tests.test_images.ContractProbe.test_a_shell_less_viewer_timeout_also_cleans_up, tests.test_images.AdapterScreenshot.test_custom_screenshot_command, tests.test_images.AdapterScreenshot.test_unviable_screenshot_command_is_refused, tests.test_images.AdapterScreenshot.test_default_capture_helper_is_the_fallback
+  - tmux is not part of the contract: `new` neither probes, records nor refuses it. The base image
+    ships it, so every built-in flavour has a terminal; `capabilities` reports it live, and
+    `term start` names the install route when it is missing.
+  - `new` records the flavour name as `deskbench.flavour`, so a message about a missing capability
+    can name the flavour and its image; a bare `--image` has no flavour name and is named by its
+    image alone.
+- Tests: tests.test_images.ContractProbe.test_a_missing_shell_is_an_error_naming_the_flavour, tests.test_images.ContractProbe.test_the_shell_probe_runs_as_the_configured_user, tests.test_images.ContractProbe.test_a_failing_screenshot_command_is_an_error_naming_the_capability, tests.test_images.ContractProbe.test_a_flavour_with_no_known_tool_is_refused_and_cleaned_up, tests.test_images.ContractProbe.test_a_failed_new_leaves_no_container, tests.test_images.ContractProbe.test_a_shell_less_viewer_timeout_also_cleans_up, tests.test_images.AdapterScreenshot.test_custom_screenshot_command, tests.test_images.AdapterScreenshot.test_unviable_screenshot_command_is_refused, tests.test_images.AdapterScreenshot.test_default_capture_helper_is_the_fallback, tests.test_term.StartFailures.test_the_flavour_is_recorded_as_a_creation_label, tests.test_term.StartFailures.test_ad_hoc_image_is_named_by_its_image_only, tests.test_term.StartFailures.test_a_desktop_without_the_flavour_label_names_its_image, tests.test_term.StartFailures.test_missing_tmux_names_the_flavour_and_route_not_a_raw_runtime_error
 
 ### Publish images
 A release publishes the built-in images so a fresh machine can pull them.
