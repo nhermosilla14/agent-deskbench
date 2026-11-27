@@ -1,5 +1,6 @@
 # Attach from the host, private shell, tray and settings
 
+- Status: Done
 - Intents: 20261127-host-attach-and-tray
 - ADRs: 20261127-humans-attach-from-their-own-terminal,
   20261127-settings-are-host-preferences-edited-by-the-tray

@@ -21,7 +21,7 @@ version.
 | Process | Lifetime | Responsibility |
 |---|---|---|
 | `deskbench` (CLI) | one invocation | create, list, exec, capture, run terminal sessions, probe capabilities, stop; spawns the tray on first desktop |
-| `deskbench tray` | first desktop → last desktop | StatusNotifierItem, menu, refresh on Podman events, exit at zero |
+| `deskbench tray` | first desktop → last desktop | StatusNotifierItem, menu (viewer, terminals, private shell, settings), refresh on Podman events, exit at zero |
 | `podman` | always | container lifecycle and the authoritative list of desktops |
 | desktop container | per desktop | `Xvnc` + `openbox` + `websockify`/noVNC |
 
@@ -42,7 +42,12 @@ sessions exist; `term list` asks tmux, so a session cannot survive its desktop a
 cannot invent one. Capabilities are the opposite kind of fact: they are probed on every
 `capabilities` call and whenever `term start` needs tmux, because an agent can install into a
 container at any time and a recorded answer would go stale. Only facts frozen at creation — the
-viewer, the screenshot command, the run user — are labels.
+viewer, the screenshot command, the run user, the flavour name — are labels.
+
+The one host file is the user's preferences, `$XDG_CONFIG_HOME/agent-deskbench/settings.toml`, beside
+the flavour manifests. It holds a preference that cannot be derived from the runtime (today, the
+default grid for tray-started terminals), never desktop state, and the tray is its only writer. The
+desktop rule above is unchanged: a preference cannot invent a desktop, list one or outlive one.
 
 ## Images
 
@@ -86,8 +91,12 @@ lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the 
 | `deskbench.sessions` | naming, URL derivation, size parsing |
 | `deskbench.term` | tmux argument builders, grid rules and the session-list parser, with no I/O |
 | `deskbench.capabilities` | the live probe script, its report parser and the install-route message, with no I/O |
+| `deskbench.hostterm` | terminal-emulator lookup and the argv to run a command in one, with no I/O |
+| `deskbench.settings` | the XDG preferences file: read, validate, atomic write |
 | `deskbench.lock` | tray singleton and liveness via a lifetime-held flock |
-| `deskbench.tray` | GTK/AppIndicator icon, menu, event loop, flock |
+| `deskbench.tray` | GTK/AppIndicator icon, worker polling, menu rendering, settings dialog, flock |
+| `deskbench.tray_menu` | the tray's menu content as data, plus the signature that decides a rebuild |
+| `deskbench.settings_window` | the GTK dialog that edits the user's settings |
 | `deskbench.notify` | `ask`: notification with actions, blocking until done |
 
 ## Boundaries
@@ -101,4 +110,6 @@ lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the 
 - `sudo` inside the container escalates to the namespace root, which is not the host root: it cannot
   touch host files the invoking user does not already own.
 - The viewer port is published on `127.0.0.1` only.
-- The tray and the CLI share no state and never call each other; both read Podman.
+- The tray and the CLI share no state and never call each other; both read Podman. The tray spawns
+  processes only through the same functions the CLI uses (`xdg-open` for the viewer, the attach path
+  for a terminal), and writes exactly one host file, the user's settings.

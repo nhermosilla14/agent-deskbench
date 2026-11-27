@@ -22,6 +22,37 @@ RESULT_TIMEOUT = 4
 RESULT_CLOSED = 5
 
 
+def send_async(summary: str, body: str) -> None:
+    """Show a failure notification and return at once; the caller's GLib main loop does the rest.
+
+    Used by the tray, which must not block its loop on the notification service.
+    """
+    try:
+        from gi.repository import Gio, GLib
+    except (ImportError, ValueError) as exc:
+        print(f"deskbench: could not send a notification ({exc})", file=sys.stderr)
+        return
+
+    params = GLib.Variant(
+        "(susssasa{sv}i)",
+        (APP_NAME, 0, "dialog-error", summary, body, [], {"urgency": GLib.Variant("y", 1)}, 10000),
+    )
+
+    def on_reply(bus: object, result: object) -> None:
+        try:
+            bus.call_finish(result)
+        except GLib.Error as exc:
+            print(f"deskbench: could not send a notification: {exc.message}", file=sys.stderr)
+
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    except GLib.Error as exc:
+        print(f"deskbench: could not send a notification: {exc.message}", file=sys.stderr)
+        return
+    bus.call(SERVICE, OBJECT, SERVICE, "Notify", params, GLib.VariantType.new("(u)"),
+             Gio.DBusCallFlags.NONE, 5000, None, on_reply)
+
+
 def ask(name: str, message: str, timeout: int = 600) -> int:
     desktop = engine.get(name)
 

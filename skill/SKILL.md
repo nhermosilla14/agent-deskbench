@@ -77,6 +77,8 @@ deskbench stop check
 | `term send NAME -- TEXT` or `--key K` | Type text plus Enter, or one named key |
 | `term list NAME [--json]` | Sessions, their grid and how many clients are attached |
 | `term stop NAME [--session S]` | End one session and keep the desktop |
+| `term attach NAME [--session S]` | Open the session in your own terminal (the tray does the same) |
+| `shell NAME` | A private interactive shell that no multiplexer manages |
 
 Names are lowercase letters, digits and hyphens. Without `--name` you get `desk1`, `desk2`, and so on.
 
@@ -153,6 +155,12 @@ deskbench term stop dev                          # when you are done with it
   the frame, not escape soup.
 - The session ends when its shell exits. After that, `screen` and `send` tell you so; start a new one.
 - `term list` shows what exists; a session outlives your detaching from it.
+- **A session is shared.** A human can join the same pane from their own terminal — `term attach`, or
+  the tray's Terminals menu — and sees exactly what `screen` shows you. What they type, you can read;
+  what you type, they see. It is not a private channel.
+- When a human must type a password, a token or a key, point them at `deskbench shell NAME` instead:
+  it is an interactive shell with no multiplexer, so it appears in neither `term list` nor the tray
+  and you cannot read it. Never invite a secret into a listed session.
 
 ## Handing control to a human
 
@@ -162,6 +170,11 @@ notification containing the viewer URL, makes the tray icon pulse, and blocks:
 ```sh
 deskbench ask check --timeout 120 "The Save dialog is asking for a filename; please choose one"
 ```
+
+If the work is in a terminal session, say so in the message: the human can join that same session
+from the tray, or with `deskbench term attach NAME`, and type in the pane you are reading. After they
+answer, take a fresh `shot` — or `term screen` for a session — because the screen changed underneath
+you.
 
 Exit codes matter: `0` the human pressed *I'm done*, `4` they did not answer in time, `5` the request
 was dismissed or the desktop or notification service went away. After `0`, take a fresh `shot` — the
@@ -204,4 +217,9 @@ screen has changed underneath you.
 - Launch long-running apps with a trailing `&`; `exec` returns when the command returns.
 - A session is not a log: `screen` shows the visible pane. For a long build, `--history`, or run it
   under `exec` and read `logs`.
+- `term attach` finds a terminal emulator on the host (`$TERMINAL`, `xdg-terminal-exec`, then the
+  common ones); `DESKBENCH_TERMINAL` overrides it. `term attach --print` shows the command it would
+  run and spawns nothing — useful for testing, not an interface to rely on.
+- The tray's Settings window holds one value for now, the default grid for `New terminal…`; it does
+  not change what `term start` requires.
 - A desktop with the same name as an existing one is refused; pick another or stop the old one.

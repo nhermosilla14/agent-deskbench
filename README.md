@@ -52,6 +52,8 @@ deskbench term screen NAME [--history N]   the session's visible screen, as plai
 deskbench term send NAME -- TEXT | --key K type into the session, or send one named key
 deskbench term list NAME [--json]          sessions, their grid and attached clients
 deskbench term stop NAME [--session S]     end one session, keep the desktop
+deskbench term attach NAME [--session S]   open the session in your own terminal
+deskbench shell NAME                       a private interactive shell
 ```
 
 ### Terminal sessions
@@ -74,6 +76,14 @@ client cannot reflow what the agent reads; choose `80x24` as a baseline and wide
 logs. Sessions need `tmux` in the image (the built-ins ship it); `deskbench capabilities NAME` reports
 whether a given image has it, along with its package managers and whether a privileged write is
 possible, so an agent installs the way that image expects instead of assuming Debian.
+
+The developer can join any live session from the tray's *Terminals* menu, or with
+`deskbench term attach NAME --session S`, which opens it in their own terminal emulator. Both sides
+then share one pane: what the agent reads is what the human sees. Because that makes a session
+readable by the agent, `deskbench shell NAME` opens a private interactive shell that no multiplexer
+manages and no listing shows — the place for a password or a token. The tray's *Settings* window holds
+one value, the default grid for terminals started from the menu, stored in
+`$XDG_CONFIG_HOME/agent-deskbench/settings.toml`.
 
 ### Image flavours
 

@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from . import engine, flavours, lock, sessions, term
+from . import engine, flavours, hostterm, lock, sessions, term
 from .engine import EngineError
 
 PROGRAM = "deskbench"
@@ -173,6 +174,23 @@ def build_parser() -> argparse.ArgumentParser:
     term_stop_parser.add_argument("name")
     term_stop_parser.add_argument("--session", default=term.DEFAULT_SESSION, help="session name")
     term_stop_parser.set_defaults(handler=cmd_term_stop)
+
+    term_attach_parser = term_verbs.add_parser(
+        "attach", help="open a session in a new host terminal window"
+    )
+    term_attach_parser.add_argument("name")
+    term_attach_parser.add_argument("--session", default=term.DEFAULT_SESSION, help="session name")
+    term_attach_parser.add_argument(
+        "--print", action="store_true", dest="print_only",
+        help="debugging only: print the host command, spawn nothing",
+    )
+    term_attach_parser.set_defaults(handler=cmd_term_attach)
+
+    shell = subparsers.add_parser(
+        "shell", help="run a private sh -l in a desktop here (not a session, no multiplexer)"
+    )
+    shell.add_argument("name")
+    shell.set_defaults(handler=cmd_shell)
 
     tray = subparsers.add_parser("tray", help=argparse.SUPPRESS)
     tray.set_defaults(handler=cmd_tray)
@@ -369,6 +387,20 @@ def cmd_term_stop(args: argparse.Namespace) -> int:
     session = sessions.validate_name(args.session)
     engine.term_stop(args.name, session)
     return 0
+
+
+def cmd_term_attach(args: argparse.Namespace) -> int:
+    """Open a session in a host terminal. ``--print`` only shows the command; see hostterm."""
+    session = sessions.validate_name(args.session)
+    if args.print_only:
+        print(shlex.join(hostterm.attach_argv(args.name, session)))
+        return 0
+    hostterm.attach(args.name, session)
+    return 0
+
+
+def cmd_shell(args: argparse.Namespace) -> int:
+    return subprocess.call(engine.shell_command(args.name))
 
 
 def cmd_ask(args: argparse.Namespace) -> int:

@@ -651,3 +651,28 @@ def term_stop(name: str, session: str) -> None:
     desktop = get(name)
     _require_term(desktop, session)
     _tmux(desktop, term.kill_session_args(session))
+
+
+def _interactive(desktop: Desktop, command: list[str]) -> list[str]:
+    """Runtime argv for ``exec -it`` as the user the desktop was started with."""
+    try:
+        binary = runtimes.detect().binary
+    except runtimes.MissingRuntime as exc:
+        raise EngineError(str(exc)) from exc
+    args = [binary, "exec", "-it"]
+    user = desktop.labels.get(sessions.RUN_USER_LABEL)
+    if user:
+        args.extend(["--user", user])
+    return [*args, desktop.container, *command]
+
+
+def term_attach_command(name: str, session: str) -> list[str]:
+    """Runtime argv that attaches a terminal to ``session``; checks the desktop and session first."""
+    desktop = get(name)
+    _require_term(desktop, session)
+    return _interactive(desktop, ["tmux", *term.attach_args(session)])
+
+
+def shell_command(name: str) -> list[str]:
+    """Runtime argv for a private ``sh -l``. It has no multiplexer, so it is never a session."""
+    return _interactive(get(name), ["sh", "-l"])

@@ -79,6 +79,10 @@ def kill_session_args(session: str) -> list[str]:
     return ["kill-session", "-t", _target(session)]
 
 
+def attach_args(session: str) -> list[str]:
+    return ["attach", "-t", _target(session)]
+
+
 def pin_args(session: str) -> list[str]:
     return ["set-option", "-w", "-t", _pane_target(session), "window-size", "manual"]
 
