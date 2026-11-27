@@ -10,6 +10,15 @@ PREFIX = "deskbench-"
 LABEL = "deskbench=1"
 WEB_PORT = 6080
 DEFAULT_SIZE = "1600x1000"
+DEFAULT_VIEWER_PATH = "/vnc.html?autoconnect=1&resize=scale"
+
+# Labels recording the effective contract of a running desktop. The runtime is the only state
+# store, so a desktop keeps the configuration it started with even if its manifest changes.
+VIEWER_PORT_LABEL = "deskbench.viewer.port"
+VIEWER_PATH_LABEL = "deskbench.viewer.path"
+VIEWER_SCHEME_LABEL = "deskbench.viewer.scheme"
+SCREENSHOT_LABEL = "deskbench.screenshot"
+RUN_USER_LABEL = "deskbench.run.user"
 
 _NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$")
 _SIZE = re.compile(r"^(\d{3,5})x(\d{3,5})$")
@@ -55,8 +64,20 @@ def next_free_name(taken: list[str]) -> str:
     return f"desk{index}"
 
 
-def viewer_url(host_port: int, host: str = "127.0.0.1") -> str:
-    return f"http://{host}:{host_port}/vnc.html?autoconnect=1&resize=scale"
+def viewer_url(
+    host_port: int,
+    host: str = "127.0.0.1",
+    scheme: str = "http",
+    path: str = DEFAULT_VIEWER_PATH,
+) -> str:
+    """Return the viewer URL for a published host port.
+
+    The path defaults to the built-in image's noVNC page; a third-party image may publish
+    anything else. A path without a leading slash is still addressed from the root.
+    """
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{scheme}://{host}:{host_port}{path}"
 
 
 @dataclass(frozen=True)

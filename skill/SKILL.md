@@ -61,8 +61,8 @@ deskbench stop check
 
 | Verb | Use |
 |---|---|
-| `new [--name N] [--size WxH] [--flavour F]` | Create a desktop; prints JSON with `name`, `url`, `id` |
-| `images [--json]` | The shipped image flavours and whether they are built |
+| `new [--name N] [--size WxH] [--flavour F \| --image REF] [--pull P]` | Create a desktop; prints JSON with `name`, `url`, `id` |
+| `images [--json]` | Built-in and user image flavours, and whether they are present locally |
 | `ls [--json]` | What exists right now, with URLs |
 | `url NAME` | Just the viewer URL |
 | `exec NAME -- CMD...` | Run a command inside the desktop; streams output, returns its exit code |
@@ -75,7 +75,7 @@ Names are lowercase letters, digits and hyphens. Without `--name` you get `desk1
 
 ## Choosing a desktop image
 
-`new` starts from a named flavour. Ask what is available:
+`new` starts from a named flavour, or from a fully qualified image reference with `--image`:
 
 ```sh
 deskbench images
@@ -92,7 +92,15 @@ Rules of thumb:
 - Use a browser flavour instead of installing a browser yourself. The base image is bare on purpose,
   so `apt-get install firefox-esr` costs a network round trip *every* session.
 - Stay on `base` when you are going to install packages anyway, or when the app is native. A flavour
-  costs one build the first time; installing by hand costs minutes every time.
+  costs one pull the first time; installing by hand costs minutes every time.
+- `--pull=missing` (the default) uses a local image and pulls only when needed; `--pull=always`
+  refreshes the tag and `--pull=never` refuses to pull. No path builds an image.
+- Use `--image registry.example.com/team/desktop:1` for an image that is not listed by
+  `deskbench images`; the reference must be fully qualified and carry a tag or digest.
+- A user flavour is a directory under `~/.config/agent-deskbench/flavours` with a `flavour.toml`.
+  `images` shows it with source `user`; `new --flavour NAME` uses it exactly like a built-in.
+- A third-party image may need `[viewer]`, `[run]` and `[screenshot]` in its manifest. `new` refuses
+  an image it cannot view, capture or exec into, so a successful `new` means all three work.
 - Launch Chromium through `chromium-desk`. It only adds `--disable-dev-shm-usage` (containers have a
   64 MB `/dev/shm`); the renderer sandbox stays on. If a hardened host blocks unprivileged user
   namespaces Chromium will refuse to start and say so — then pass `--no-sandbox` yourself and know
@@ -129,8 +137,8 @@ screen has changed underneath you.
 
 ## Gotchas that waste a run
 
-- **The first `new` builds the image** and takes a couple of minutes, printing a progress line to
-  stderr. Later desktops start in about a second. Do not kill it early.
+- **The first `new` pulls the image** and can take a couple of minutes, printing progress to stderr.
+  Later desktops start in about a second. Do not kill it early; `--pull=always` refreshes the tag.
 - **There is no GPU.** Rendering is software (`llvmpipe`). Fine for widgets, forms and text; expect
   slow or missing WebGL, video and animations. An odd-looking blur or shader may be the bench, not a
   bug in the app.
@@ -139,9 +147,10 @@ screen has changed underneath you.
   check `logs` and that you launched it inside the desktop.
 - **`stop` destroys everything.** The container is `--rm`, so files, installed packages and app state
   vanish. Do not stop until you have what you need.
-- **You are not root inside.** Everything runs as the unprivileged user `agent`, so applications
-  behave as they would on a workstation instead of hitting root-only paths and sandbox refusals.
-  When you genuinely need packages, `sudo` is passwordless:
+- **You are not root inside.** Built-in images run everything as the unprivileged user `agent`
+  (uid 1000), so applications behave as they would on a workstation instead of hitting root-only
+  paths and sandbox refusals. A third-party flavour can choose another `[run].user`; `exec` uses the
+  user recorded at creation. When you genuinely need packages, `sudo` is passwordless:
   `deskbench exec NAME -- sudo apt-get install -y ...`
 - **Bind mounts keep their ownership**: files you create inside a mount are owned by you on the
   host, and host files keep their owner inside.

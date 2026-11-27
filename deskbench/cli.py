@@ -71,14 +71,30 @@ def build_parser() -> argparse.ArgumentParser:
     new = subparsers.add_parser("new", help="start a desktop and print its URL as JSON")
     new.add_argument("--name", help="desktop name (default: first free deskN)")
     new.add_argument("--size", default=sessions.DEFAULT_SIZE, help="screen geometry, WxH")
-    new.add_argument("--image", help=f"override the container image (default {engine.IMAGE})")
-    new.add_argument("--flavour", default="base", metavar="NAME",
-                     help=f"image variant: {', '.join(flavours.names())} (default base)")
+    image_choice = new.add_mutually_exclusive_group()
+    image_choice.add_argument(
+        "--flavour",
+        default=None,
+        metavar="NAME",
+        help="built-in or user flavour (see `deskbench images`; default: base)",
+    )
+    image_choice.add_argument(
+        "--image",
+        metavar="REF",
+        help="fully qualified OCI image reference carrying a tag or digest",
+    )
+    new.add_argument(
+        "--pull",
+        choices=("missing", "always", "never"),
+        default="missing",
+        help="image pull policy: missing uses a local image and pulls only when absent, "
+             "always refreshes it, never fails when absent (default: missing)",
+    )
     new.add_argument("--bind", action="append", default=[], metavar="SRC[:DST][:ro]",
                      help="make a host path visible inside the desktop (repeatable)")
     new.set_defaults(handler=cmd_new)
 
-    images = subparsers.add_parser("images", help="list the shipped image flavours")
+    images = subparsers.add_parser("images", help="list the built-in and user image flavours")
     images.add_argument("--json", action="store_true", help="machine-readable output")
     images.set_defaults(handler=cmd_images)
 
@@ -158,8 +174,11 @@ def cmd_new(args: argparse.Namespace) -> int:
         raise EngineError(f"desktop {name!r} already exists; pick another name or stop it")
     size = sessions.validate_size(args.size)
     binds = [sessions.parse_bind(value) for value in args.bind]
-    image = args.image or engine.ensure_flavour(args.flavour)
-    desktop = engine.create(name, size, image, binds)
+    if args.image:
+        flavour = flavours.adhoc(args.image)
+    else:
+        flavour = flavours.get(args.flavour or "base")
+    desktop = engine.create(name, size, flavour, binds, args.pull)
     try:
         _spawn_tray()
     except OSError as exc:
@@ -186,23 +205,29 @@ def cmd_ls(args: argparse.Namespace) -> int:
 
 
 def cmd_images(args: argparse.Namespace) -> int:
-    rows = []
-    for name in flavours.names():
-        flavour = flavours.get(name)
-        tag = flavours.tag_for(name)
-        rows.append({
-            "name": name,
-            "tag": tag,
-            "built": engine.image_exists(tag),
+    discovery = flavours.discover()
+    for problem in discovery.problems:
+        print(f"{PROGRAM}: ignoring {problem.path}: {problem.message}", file=sys.stderr)
+    rows = [
+        {
+            "name": flavour.name,
+            "source": flavour.source,
+            "image": flavour.image,
+            "present": engine.image_exists(flavour.image),
             "summary": flavour.summary,
-        })
+        }
+        for flavour in discovery.flavours
+    ]
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
-    width = max(len(row["name"]) for row in rows)
+    name_width = max(len(row["name"]) for row in rows)
+    source_width = max(len(row["source"]) for row in rows)
+    image_width = max(len(row["image"]) for row in rows)
     for row in rows:
-        state = "built" if row["built"] else "-"
-        print(f"{row['name']:<{width}}  {state:<6}  {row['summary']}")
+        state = "yes" if row["present"] else "no"
+        print(f"{row['name']:<{name_width}}  {row['source']:<{source_width}}  "
+              f"{state:<3}  {row['image']:<{image_width}}  {row['summary']}")
     return 0
 
 
@@ -266,7 +291,14 @@ def main(argv: list[str] | None = None) -> int:
         _use_gi_interpreter(arguments)  # may replace this process
     try:
         return args.handler(args)
-    except (EngineError, sessions.SessionError, flavours.UnknownFlavour) as exc:
+    except (
+        EngineError,
+        sessions.SessionError,
+        flavours.UnknownFlavour,
+        flavours.InvalidImage,
+        flavours.FlavourConfigError,
+        flavours.ManifestError,
+    ) as exc:
         print(f"{PROGRAM}: {exc}", file=sys.stderr)
         return 1
 

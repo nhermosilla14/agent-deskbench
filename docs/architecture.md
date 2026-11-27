@@ -1,6 +1,7 @@
 # Architecture
 
-One Python package, one container image, one container runtime. Nothing runs when no desktop exists.
+One Python package, three published desktop images, one container runtime. Nothing runs when no
+desktop exists.
 
 ```
 agent ──shell──► deskbench CLI ──podman──► desktop container ──► app under test
@@ -26,10 +27,43 @@ version.
 
 ## State
 
-There is no local state. `podman ps --filter label=deskbench=1` is the list of desktops; the
-container's published port is the viewer URL; the container name is the desktop name. A tray process
-that outlives its containers is impossible to observe as stale: it recounts on every event and exits
-at zero.
+There is no local state. `podman ps --filter label=deskbench=1` is the list of desktops and the
+container name is the desktop name. The container also carries the resolved contract as labels:
+`deskbench.viewer.port`, `deskbench.viewer.path`, `deskbench.viewer.scheme`,
+`deskbench.screenshot` (compact JSON with `command` and `settle`) and `deskbench.run.user`. `ls`,
+`url`, `exec` and `shot` read them, so a manifest edited later cannot mutate a running desktop.
+Containers without those labels fall back to the built-in layout (port 6080, the noVNC path,
+`http`, user `1000:1000`) and, for screenshots, to probing the image for `deskbench-capture`,
+`scrot` or `import`.
+
+## Images
+
+The built-in flavours are OCI image references (`base`, `firefox`, `chromium`) under
+`ghcr.io/nhermosilla14/agent-deskbench`, redirected at call time by `DESKBENCH_REGISTRY`. `new`
+pulls a missing reference and never builds. `image/` and `image/flavours/*` are the build inputs for
+`task image` and the publishing pipeline, not a runtime dependency.
+
+User flavours live in `$XDG_CONFIG_HOME/agent-deskbench/flavours/<name>/flavour.toml` (default
+`~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference,
+an optional summary, and optional `[viewer]`, `[run]` and `[screenshot]` tables describing a
+third-party image's contract: `port`, `path`, `scheme` and `timeout` for the viewer; `user`,
+`entrypoint`, `command` and `env` for the process, with `{width}`/`{height}` substituted from
+`--size`; and a capture `command` with `{output}`/`{settle}` placeholders plus a `settle` flag. A
+command-less flavour resolves `deskbench-capture`, `scrot` or `import` from the image. `new` probes
+the shell and the screenshot before reporting success and removes the container when either fails.
+`flavours.discover()` merges valid manifests with the built-ins for `images`, reporting bad
+candidates as problems, and `get()` resolves a user name at `new` time. A directory that shadows a
+built-in is an error.
+
+## Publishing
+
+A release publishes the built-ins. `.github/workflows/publish.yml` runs on `v*` tags and manual
+dispatch; it logs in with `GITHUB_TOKEN` (`packages: write`), derives the tags with
+`scripts/image-tags.sh`, and pushes the base then Firefox and Chromium with `BASE` set to it. Each
+image gets `:X.Y.Z`, `:X.Y`, `:X`, `:latest` and `:sha-<short>`; `:X` is the moving major line the
+CLI resolves. Pull requests touching `image/**` or the publish scripts build all three without
+pushing. `task publish REGISTRY=... VERSION=...` does the same locally through Podman. The mapping
+lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the tests.
 
 ## Module map
 
@@ -37,6 +71,7 @@ at zero.
 |---|---|
 | `deskbench.cli` | argument parsing and the verb implementations |
 | `deskbench.engine` | the only module that talks to Podman |
+| `deskbench.flavours` | built-in and user flavour discovery, manifests, registry override and reference validation |
 | `deskbench.sessions` | naming, URL derivation, size parsing |
 | `deskbench.lock` | tray singleton and liveness via a lifetime-held flock |
 | `deskbench.tray` | GTK/AppIndicator icon, menu, event loop, flock |
@@ -45,9 +80,11 @@ at zero.
 ## Boundaries
 
 - The container is the only isolated unit; the host shares its kernel with it.
-- Inside the container everything runs as `agent` (uid 1000). `--userns=keep-id:uid=1000` maps that
-  uid to whoever invoked the tool, so bind-mounted files keep their ownership in both directions and
-  host files never come back owned by a subuid.
+- The CLI never builds an image: it pulls according to `--pull`. Images are produced by `task image`
+  locally and by the publishing workflow on a release.
+- Inside a built-in image everything runs as `agent` (uid 1000). A manifest may set `[run].user` to
+  another uid; the runtime maps that uid to whoever invoked the tool, so bind-mounted files keep
+  their ownership in both directions only when the configured uid matches the host mapping.
 - `sudo` inside the container escalates to the namespace root, which is not the host root: it cannot
   touch host files the invoking user does not already own.
 - The viewer port is published on `127.0.0.1` only.

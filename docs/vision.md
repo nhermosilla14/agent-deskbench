@@ -20,6 +20,8 @@ while leaving the human a cheap way to look in and type whenever the agent needs
 4. Between sessions the machine has no extra processes and no tray icon.
 5. Podman is the only state store; there is no daemon, no database and no privileged helper.
 6. Every behaviour is provable through the CLI, which is the only supported entry point.
+7. A flavour is an OCI image reference: a developer can add one under the user config directory,
+   and any image that satisfies the viewer, screenshot and shell contract can run.
 
 ## Non-goals
 
@@ -33,7 +35,9 @@ while leaving the human a cheap way to look in and type whenever the agent needs
 ## Success criteria
 
 - From a cold start, an agent goes from no desktop to a screenshot of its own application in under
-  15 seconds, having typed nothing but `deskbench new` and `deskbench shot`.
+  15 seconds, having typed nothing but `deskbench new` and `deskbench shot`, once the image is local
+  (the first pull is a one-time cost).
+- A release publishes the built-in images, so a fresh machine needs no local build.
 - Stopping the last desktop leaves zero `deskbench` processes and zero containers.
 - A human takes over a running session in one click and hands it back in one click.
 - The end-to-end suite runs against real Podman and passes unattended.
@@ -44,3 +48,5 @@ while leaving the human a cheap way to look in and type whenever the agent needs
 - No third-party Python packages: the host may not have a working package index.
 - The panel is a StatusNotifierItem host (KDE Plasma is the reference environment).
 - The desktop image must build from distribution packages only, with no external apt repositories.
+- The CLI pulls images; building belongs to maintainers (`task image`, `task publish`) and the
+  release workflow.

@@ -1,6 +1,6 @@
 # Build the desktop image locally on first use
 
-- Status: Accepted
+- Status: Superseded by 20261126-flavours-are-oci-image-references
 - Date: 2026-11-22
 - Deciders: Nicolás Hermosilla Polanco
 - Approved by: Nicolás Hermosilla Polanco
