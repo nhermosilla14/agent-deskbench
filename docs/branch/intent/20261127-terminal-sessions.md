@@ -14,7 +14,7 @@ the working directory, environment and background jobs survive between calls.
 ## Acceptance criteria
 
 - `deskbench term start NAME [--session S] [--cells WxH]` starts a session inside the desktop that
-  runs the image's login shell, fixes its grid to the requested size (`--cells`, default `100x35`),
+  runs the image's login shell, fixes its grid to the requested size (`--cells`, default `80x24`),
   and returns only once the session answers.
 - Several sessions may exist per desktop (`--session`, default `main`); a duplicate name exits 1
   naming the session.
@@ -31,16 +31,24 @@ the working directory, environment and background jobs survive between calls.
   waiting for input or looping.
 - A session outlives its attached clients: with nobody attached it stays readable and writable, and
   the agent's reads do not disturb whoever is attached.
-- `new` records whether the image provides tmux as a container label; a desktop whose image lacks it
-  fails `term` with exit 1 naming the flavour and the missing capability, before changing anything.
-- The base image ships tmux from distribution packages, so every built-in flavour satisfies the
-  terminal contract.
+- `deskbench capabilities NAME [--json]` reports, from a live probe, whether the desktop has the
+  shell, the screenshot tool, tmux, a terminal emulator and sudo, with the resolved path for each.
+  The answer reflects the container as it is now, so it is still true after the agent installs
+  something.
+- `term start` probes tmux at first use rather than trusting a recorded answer. When it is absent it
+  exits 1 naming the flavour, the missing capability and the command that installs it
+  (`sudo apt-get install -y tmux`); installing it in the session makes the next call succeed.
+- `new` does not probe, record or refuse anything about terminals: capability is discovered live, and
+  the creation contract still covers exactly the viewer, the screenshot and the shell.
+- The base image ships tmux from distribution packages, so every built-in flavour has the capability
+  without a network round trip.
 - `term` against an unknown desktop fails before touching anything.
 
 ## Spec changes
 
 - Adds: `terminal.md` / Terminal sessions
-- Changes: `images.md` / the desktop contract (the tmux capability and its label)
+- Adds: `cli.md` / Capabilities
+- Changes: `cli.md` / the verb index
 
 ## Out of scope
 
@@ -50,12 +58,12 @@ the working directory, environment and background jobs survive between calls.
 - stdin and TTY flags on `exec`.
 - Session recording (asciinema-style casts), mouse input, and colour-preserving capture.
 - Starting a session automatically from `new`.
+- Installing packages on the agent's behalf; a failure names the command and the agent decides.
 
 ## Open questions
 
-- Is `100x35` the right default grid? It fits 800x600 at a typical 8x17 cell and covers a full-screen
-  TUI, but it is a visible default.
-- Should `new` refuse an image with no tmux, as it refuses one with no screenshot tool, or accept it
-  and let `term` name the missing capability? Refusing is consistent with failing fast, but breaks
-  every third-party flavour that works today and contradicts the README promise that a successful
-  `new` means the desktop is fully usable.
+- Is `80x24` the right default grid, or should `term start` require `--cells`? `80x24` is the
+  VT100/xterm/tmux default, it is what programs are written against, and any human terminal can show
+  the whole shared session uncropped; it is narrower than a modern developer terminal for logs and
+  wide diffs, which is what `--cells` is for. `100x35` came from converting an 800x600 window to
+  cells and matches no standard.
