@@ -46,6 +46,12 @@ class Model(unittest.TestCase):
         model = tray_menu.build([desktop()], {}, settings.Settings(default_size="100x30"))
         self.assertEqual(model.new_terminal_size, "100x30")
 
+    def test_an_ended_session_is_labelled_ended_not_attached(self):
+        ended = term.TermSession(name="main", cols=120, rows=40, attached=0, ended=True)
+        model = tray_menu.build([desktop()], {"desk1": [ended]}, settings.Settings())
+        self.assertEqual([item.label for item in model.desktops[0].terminals],
+                         ["main  ·  ended"])
+
 
 class Signature(unittest.TestCase):
     def sig(self, desktops, sessions=None, size="120x40"):
@@ -69,6 +75,11 @@ class Signature(unittest.TestCase):
     def test_a_desktop_state_change_changes_it(self):
         self.assertNotEqual(self.sig([desktop(state="running")]),
                             self.sig([desktop(state="exited")]))
+
+    def test_a_session_going_from_alive_to_ended_changes_it(self):
+        ended = term.TermSession(name="main", cols=120, rows=40, attached=0, ended=True)
+        self.assertNotEqual(self.sig([desktop()], {"desk1": [session("main")]}),
+                            self.sig([desktop()], {"desk1": [ended]}))
 
     def test_a_settings_change_changes_it(self):
         self.assertNotEqual(self.sig([desktop()], size="120x40"), self.sig([desktop()], size="100x30"))

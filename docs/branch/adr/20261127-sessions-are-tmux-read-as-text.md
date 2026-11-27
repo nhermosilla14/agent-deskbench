@@ -18,6 +18,12 @@ The need splits into three parts: state that survives between calls, answers to 
 of what a full-screen program is drawing. "Interactivity" on its own is not a requirement, because an
 agent's tool call has no way to type a character while the call is open.
 
+A session is shared with a human, who can attach to the same pane and type into it. That makes the
+shell's lifetime not exclusively the agent's business: a human pressing `Ctrl-D` at the prompt sends
+end-of-file to `sh`, which exits exactly as an `exit` would. If that destroys the pane, a guest can
+erase the host's transcript, its exit status and whatever it was in the middle of, and the agent
+cannot tell what happened.
+
 Three constraints bound the answer. `docs/vision.md` rules out an in-container control daemon for
 semantic automation, keeps Podman as the only state store, and forbids third-party Python packages.
 The agent's current view of a desktop is `shot`, a PNG of several hundred kilobytes that can only be
@@ -41,9 +47,10 @@ truth.
   `deskbench term stop NAME [--session S]` ends one session and leaves the desktop running.
 - Several named sessions may exist per desktop, with `main` as the default name. A duplicate name is
   refused.
-- A session ends when its shell exits. `remain-on-exit` stays off, so the pane is not kept as a
-  corpse; `term screen` and `term send` on a session that has ended fail with a message saying so,
-  instead of relaxing into a silent no-op on a dead pane.
+- A session outlives its shell. `remain-on-exit` is on, so when the shell exits — the agent's own
+  `exit`, or a human pressing `Ctrl-D` in a shared pane — the last frame and the exit status stay in
+  the pane until the session is stopped. `term screen` keeps reading it; `term send` refuses with a
+  message naming the ended session; `term list` reports it as ended; `term stop` clears it.
 - There is no host daemon and no new in-container daemon. The tmux server lives and dies with the
   `--rm` container, so Podman remains the only state store and sessions do not survive `stop`. That
   is a boundary, not a gap to extend later.
@@ -64,9 +71,10 @@ truth.
   couples capture to one emulator and walks into the vision's non-goal on in-container automation.
 - **`screen`'s `hardcopy`** — equivalent for capture, but tmux additionally provides multi-client
   attach and explicit geometry control, which the next decisions rely on.
-- **`remain-on-exit on`** — keeps the last frame after a crash, but turns `term send` into a silent
-  no-op and makes "is this session usable" a question the agent has to ask. An explicit "the session
-  has ended" is the better signal for the common case, which is a deliberate exit.
+- **Letting the pane vanish with its shell** — the original choice, and wrong once a human shares the
+  session: `Ctrl-D` silently deletes the agent's transcript and its exit status, leaving no way to
+  learn why. `remain-on-exit` keeps both, and an explicit `pane_dead` check keeps `term send` from
+  relaxing into a silent no-op.
 
 ## Consequences
 
@@ -76,6 +84,10 @@ costs an explicit `--history`. Processes started in a session die with it, which
 guarantee `exec` already gives. A flavour without tmux lacks the feature entirely; capability
 handling is a separate decision. tmux becomes a per-desktop process wherever sessions are used, and a
 new dependency that flavour authors must satisfy.
+
+An ended session is a real state the CLI has to name: `term list` reports it, `term send` refuses
+with the exit status it can read from tmux, and `term stop` is the way out. The extra check costs one
+exec per send, which is the price of never typing into a dead pane.
 
 `term list --json` keys and the `capabilities --json` keys become part of the CLI contract as soon as
 they ship, so they are named as if permanent.

@@ -379,7 +379,8 @@ def cmd_term_list(args: argparse.Namespace) -> int:
         return 0
     width = max(len(entry.name) for entry in listed)
     for entry in listed:
-        print(f"{entry.name:<{width}}  {entry.grid:<9}  attached {entry.attached}")
+        print(f"{entry.name:<{width}}  {entry.grid:<9}  "
+              f"{'ended' if entry.ended else f'attached {entry.attached}'}")
     return 0
 
 

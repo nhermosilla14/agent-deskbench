@@ -3,19 +3,27 @@ records its argv; desktops are mocked except where a ContainerTest needs a real 
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shlex
 import shutil
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from deskbench import engine, hostterm, runtime as runtimes, sessions
+from deskbench import engine, hostterm, runtime as runtimes, sessions, term
 
 from support import ContainerTest, call
+
+def stub(is_tty: bool) -> mock.Mock:
+    """A stand-in stdout that says whether it is a terminal."""
+    return mock.Mock(isatty=mock.Mock(return_value=is_tty))
+
 
 FAKE = Path(__file__).resolve().parent / "fixtures" / "fake-terminal.sh"
 
@@ -52,6 +60,30 @@ def mocked_desktop(labels: dict[str, str] | None = None) -> engine.Desktop:
 
 
 class Attach(Isolated):
+    def test_an_ended_session_warns_on_a_tty_only(self):
+        ended = term.TermSession(name="main", cols=80, rows=24, attached=0, ended=True)
+        for is_tty, warned in ((True, True), (False, False)):
+            with self.subTest(tty=is_tty), \
+                    mock.patch.object(engine, "term_list", return_value=[ended]), \
+                    mock.patch.object(hostterm, "attach_argv", return_value=["true"]), \
+                    mock.patch.object(hostterm, "_spawn"), \
+                    mock.patch("sys.stdout", stub(is_tty)), \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                hostterm.attach("d1", "main")
+            self.assertEqual("has ended" in err.getvalue(), warned)
+            if warned:
+                self.assertIn("only its last frame will be shown", err.getvalue())
+
+    def test_a_live_session_does_not_warn_about_ended(self):
+        live = term.TermSession(name="main", cols=80, rows=24, attached=0)
+        with mock.patch.object(engine, "term_list", return_value=[live]), \
+                mock.patch.object(hostterm, "attach_argv", return_value=["true"]), \
+                mock.patch.object(hostterm, "_spawn"), \
+                mock.patch("sys.stdout", stub(True)), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            hostterm.attach("d1", "main")
+        self.assertNotIn("has ended", err.getvalue())
+
     def mocked(self, *, session_exists: bool = True):
         """Mock the desktop, the session check and the runtime binary; nothing else."""
         stack = [

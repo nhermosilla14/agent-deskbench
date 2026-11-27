@@ -88,7 +88,7 @@ def attach(name: str, session: str) -> None:
     """Open ``session`` in a new terminal window and return without waiting for it."""
     argv = attach_argv(name, session)
     if sys.stdout.isatty():
-        _warn_if_smaller(name, session)
+        _warn_on_tty(name, session)
     _spawn(argv)
 
 
@@ -97,10 +97,15 @@ def open_shell(name: str) -> None:
     _spawn(_in_terminal(engine.shell_command(name)))
 
 
-def _warn_if_smaller(name: str, session: str) -> None:
+def _warn_on_tty(name: str, session: str) -> None:
     entry = next((item for item in engine.term_list(name) if item.name == session), None)
     if entry is None:
         return
+    if entry.ended:
+        print(
+            f"deskbench: session {session!r} has ended; only its last frame will be shown",
+            file=sys.stderr,
+        )
     size = shutil.get_terminal_size()
     if size.columns < entry.cols or size.lines < entry.rows:
         print(

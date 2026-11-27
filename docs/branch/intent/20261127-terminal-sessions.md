@@ -23,8 +23,11 @@ the working directory, environment and background jobs survive between calls.
 - The grid is pinned so an attached client cannot reflow it, the pin is verified by reading it back,
   and a tmux that cannot pin fails `term start` naming the limitation instead of starting a session
   whose size will drift.
-- A session ends when its shell exits. `term screen` and `term send` on a session that has ended say
-  so and fail, rather than acting on a dead pane.
+- A session outlives the exit of its shell: the pane is retained (`remain-on-exit`), so a human
+  pressing `Ctrl-D` or `exit` in a shared session cannot erase the agent's transcript. `term screen`
+  keeps reading the last frame, including the exit status; `term send` refuses with a message naming
+  the ended session; `term list` reports it as ended; `term stop` clears it so `term start` can begin
+  again.
 - Several sessions may exist per desktop (`--session`, default `main`); a duplicate name exits 1
   naming the session.
 - `deskbench term screen NAME [--session S] [--history N]` prints the visible screen as plain text

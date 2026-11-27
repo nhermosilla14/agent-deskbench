@@ -16,9 +16,12 @@ from . import engine, settings as settings_store, term
 class TerminalItem:
     session: str
     attached: int
+    ended: bool = False
 
     @property
     def label(self) -> str:
+        if self.ended:
+            return f"{self.session}  ·  ended"
         return f"{self.session}  ·  {self.attached} attached"
 
 
@@ -48,7 +51,7 @@ def build(
             state=desktop.state,
             url=desktop.url,
             terminals=tuple(
-                TerminalItem(session=entry.name, attached=entry.attached)
+                TerminalItem(session=entry.name, attached=entry.attached, ended=entry.ended)
                 for entry in sessions.get(desktop.name, ())
             ),
         )
@@ -66,7 +69,7 @@ def signature(model: MenuModel) -> tuple:
                 desktop.name,
                 desktop.state,
                 desktop.url,
-                tuple((item.session, item.attached) for item in desktop.terminals),
+                tuple((item.session, item.attached, item.ended) for item in desktop.terminals),
             )
             for desktop in model.desktops
         ),

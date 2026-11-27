@@ -153,8 +153,11 @@ deskbench term stop dev                          # when you are done with it
   a prompt with `send`, including control keys.
 - Full-screen programs are readable this way (`top`, `htop`, `less`, a TUI you are testing): you get
   the frame, not escape soup.
-- The session ends when its shell exits. After that, `screen` and `send` tell you so; start a new one.
-- `term list` shows what exists; a session outlives your detaching from it.
+- If its shell exits — your own `exit`, or a human pressing `Ctrl-D` in a shared pane — the pane is
+  kept: `term screen` still shows the last frame and the exit status, `term send` refuses, and
+  `term stop` clears it so `term start` can begin again. Nothing is lost silently.
+- `term list` shows what exists; a session outlives your detaching from it, and its pane outlives the
+  exit of its shell.
 - **A session is shared.** A human can join the same pane from their own terminal — `term attach`, or
   the tray's Terminals menu — and sees exactly what `screen` shows you. What they type, you can read;
   what you type, they see. It is not a private channel.

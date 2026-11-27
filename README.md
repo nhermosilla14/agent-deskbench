@@ -73,9 +73,12 @@ deskbench term send dev --key C-c              # one key, for a prompt or a TUI
 Because it is a real shell, `cd`, `export` and an activated virtualenv survive between commands, and a
 full-screen program is readable as a frame rather than escape sequences. The grid is pinned so a
 client cannot reflow what the agent reads; choose `80x24` as a baseline and widen it for diffs and
-logs. Sessions need `tmux` in the image (the built-ins ship it); `deskbench capabilities NAME` reports
-whether a given image has it, along with its package managers and whether a privileged write is
-possible, so an agent installs the way that image expects instead of assuming Debian.
+logs. If the shell exits — including a human pressing `Ctrl-D` in the shared pane — the pane is kept:
+`term screen` still shows the last frame and its exit status, `term send` refuses, and `term stop` then
+`term start` resumes. Sessions need `tmux` in the image (the built-ins ship it);
+`deskbench capabilities NAME` reports whether a given image has it, along with its package managers
+and whether a privileged write is possible, so an agent installs the way that image expects instead of
+assuming Debian.
 
 The developer can join any live session from the tray's *Terminals* menu, or with
 `deskbench term attach NAME --session S`, which opens it in their own terminal emulator. Both sides

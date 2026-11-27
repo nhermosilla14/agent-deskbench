@@ -33,20 +33,60 @@ class Grammar(unittest.TestCase):
                 term.validate_cells(value)
 
     def test_parse_list_reads_each_session_grid_and_attached_count(self):
-        text = "main\t1\t120\t40\t1\nmain\t1\t80\t24\t0\nother\t0\t80\t24\t1\n"
+        text = "main\t1\t120\t40\t1\t0\nmain\t1\t80\t24\t0\t0\nother\t0\t80\t24\t1\t0\n"
         listed = term.parse_list(text)
         self.assertEqual(
             [(entry.name, entry.grid, entry.attached) for entry in listed],
             [("main", "120x40", 1), ("other", "80x24", 0)],
         )
-        self.assertEqual(listed[0].as_dict(), {"name": "main", "grid": "120x40", "attached": 1})
+        self.assertEqual(
+            listed[0].as_dict(),
+            {"name": "main", "grid": "120x40", "attached": 1, "ended": False},
+        )
+
+    def test_parse_list_reads_a_dead_pane_as_ended(self):
+        listed = term.parse_list("main\t0\t80\t24\t1\t1\nlive\t0\t80\t24\t1\t0\n")
+        self.assertEqual([(entry.name, entry.ended) for entry in listed],
+                         [("main", True), ("live", False)])
+        self.assertTrue(listed[0].as_dict()["ended"])
 
     def test_parse_list_of_nothing_is_empty(self):
         self.assertEqual(term.parse_list(""), [])
 
+    def test_parse_pane_status_reads_the_exit_status_only_when_dead(self):
+        self.assertEqual(term.parse_pane_status("1 3\n"), (True, 3))
+        self.assertEqual(term.parse_pane_status("1 0"), (True, 0))
+        self.assertEqual(term.parse_pane_status("0 \n"), (False, None))
+        self.assertEqual(term.parse_pane_status(""), (False, None))
+        self.assertEqual(term.parse_pane_status("1 "), (True, None))
+
+    def test_exited_message_names_the_session_and_its_status(self):
+        message = term.exited_message("main", "desk1", 7)
+        self.assertIn("'main'", message)
+        self.assertIn("desk1", message)
+        self.assertIn("status 7", message)
+        self.assertIn("term screen", message)
+        self.assertIn("term stop", message)
+
+    def test_retained_message_explains_the_ended_session_to_start(self):
+        message = term.retained_message("main", "desk1", 0)
+        self.assertIn("'main'", message)
+        self.assertIn("status 0", message)
+        self.assertIn("term screen", message)
+        self.assertIn("term stop", message)
+
+    def test_status_is_named_as_unknown_when_tmux_gave_none(self):
+        self.assertIn("status unknown", term.exited_message("main", "desk1", None))
+
     def test_targets_are_exact_session_names(self):
         self.assertEqual(term.has_session_args("main"), ["has-session", "-t", "=main"])
         self.assertEqual(term.capture_args("main", 0)[-1], "=main:")
+
+    def test_new_session_sets_remain_on_exit_in_the_same_invocation(self):
+        args = term.new_session_args("main", 80, 24)
+        self.assertEqual(args[args.index(";") + 1:], ["set-option", "-w", "-t", "=main:",
+                                                      "remain-on-exit", "on"])
+        self.assertLess(args.index(";"), len(args) - 1)
 
     def test_history_adds_scrollback_start_only_when_asked(self):
         self.assertNotIn("-S", term.capture_args("main", 0))
@@ -193,20 +233,71 @@ class Sessions(ContainerTest):
         self.assertEqual(code, 0, err)
         self.assertIn("read answer", out)
 
-    def test_exit_ends_the_session_and_screen_and_send_say_so(self):
-        self.start("short")
-        call("term", "send", self.desktop, "--session", "short", "--", "exit")
-        deadline = time.monotonic() + 10
-        while any(entry["name"] == "short" for entry in self.listed()):
+    def wait_until_ended(self, session: str, timeout: float = 10) -> None:
+        deadline = time.monotonic() + timeout
+        while not any(entry["name"] == session and entry["ended"] for entry in self.listed()):
             if time.monotonic() > deadline:
-                self.fail("the session never went away after exit")
+                self.fail(f"session {session!r} never reported as ended")
             time.sleep(0.2)
-        code, _, err = self.screen("short")
+
+    def test_exit_keeps_the_frame_and_the_session_reports_ended(self):
+        self.start("short")
+        call("term", "send", self.desktop, "--session", "short", "--", "echo last words")
+        self.wait_for_screen("last words", "short")
+        call("term", "send", self.desktop, "--session", "short", "--", "exit")
+        self.wait_until_ended("short")
+        code, out, err = self.screen("short")
+        self.assertEqual(code, 0, err)
+        self.assertIn("last words", out)
+        self.assertIn("Pane is dead", out)
+
+    def test_send_to_an_ended_session_names_it_and_its_status(self):
+        self.start("late")
+        call("term", "send", self.desktop, "--session", "late", "--", "exit 4")
+        self.wait_until_ended("late")
+        code, _, err = call("term", "send", self.desktop, "--session", "late", "--", "echo no")
+        self.assertEqual(code, 1)
+        self.assertIn("'late'", err)
+        self.assertIn("status 4", err)
+        self.assertIn("term screen", err)
+
+    def test_start_on_an_ended_session_explains_it_and_stop_then_start_works(self):
+        self.start("again")
+        call("term", "send", self.desktop, "--session", "again", "--", "exit")
+        self.wait_until_ended("again")
+        code, _, err = call("term", "start", self.desktop, "--cells", "80x24",
+                            "--session", "again")
         self.assertEqual(code, 1)
         self.assertIn("has ended", err)
-        code, _, err = call("term", "send", self.desktop, "--session", "short", "--", "echo late")
-        self.assertEqual(code, 1)
-        self.assertIn("has ended", err)
+        self.assertIn("term screen", err)
+
+        code, _, err = call("term", "stop", self.desktop, "--session", "again")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("again", [entry["name"] for entry in self.listed()])
+        self.start("again")
+        entry = next(item for item in self.listed() if item["name"] == "again")
+        self.assertEqual(entry["ended"], False)
+
+    def test_ctrl_c_of_a_foreground_program_leaves_the_session_usable(self):
+        self.start("interrupted")
+        call("term", "send", self.desktop, "--session", "interrupted", "--", "sleep 300")
+        time.sleep(0.5)
+        code, _, err = call("term", "send", self.desktop, "--session", "interrupted",
+                            "--key", "C-c")
+        self.assertEqual(code, 0, err)
+        time.sleep(0.5)
+        entry = next(item for item in self.listed() if item["name"] == "interrupted")
+        self.assertEqual(entry["ended"], False)
+        call("term", "send", self.desktop, "--session", "interrupted", "--", "echo back")
+        self.wait_for_screen("back", "interrupted")
+
+    def test_stop_clears_an_ended_session(self):
+        self.start("cleared")
+        call("term", "send", self.desktop, "--session", "cleared", "--", "exit")
+        self.wait_until_ended("cleared")
+        code, _, err = call("term", "stop", self.desktop, "--session", "cleared")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("cleared", [entry["name"] for entry in self.listed()])
 
     def test_duplicate_session_name_is_refused(self):
         self.start("dupe")
@@ -225,7 +316,8 @@ class Sessions(ContainerTest):
     def test_list_json_reports_grid_and_attached_count(self):
         self.start("listed", cells="100x30")
         entry = next(item for item in self.listed() if item["name"] == "listed")
-        self.assertEqual(entry, {"name": "listed", "grid": "100x30", "attached": 0})
+        self.assertEqual(entry, {"name": "listed", "grid": "100x30", "attached": 0,
+                                 "ended": False})
 
         client = self.attach("listed")
         try:

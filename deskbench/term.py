@@ -17,7 +17,9 @@ MIN_ROWS, MAX_ROWS = 5, 200
 _CELLS = re.compile(r"^(\d{1,4})x(\d{1,4})$")
 _LIST_FORMAT = (
     "#{session_name}\t#{session_attached}\t#{window_width}\t#{window_height}\t#{window_active}"
+    "\t#{pane_dead}"
 )
+_STATUS_FORMAT = "#{pane_dead} #{pane_dead_status}"
 
 
 @dataclass(frozen=True)
@@ -26,13 +28,19 @@ class TermSession:
     cols: int
     rows: int
     attached: int
+    ended: bool = False
 
     @property
     def grid(self) -> str:
         return f"{self.cols}x{self.rows}"
 
-    def as_dict(self) -> dict[str, str | int]:
-        return {"name": self.name, "grid": self.grid, "attached": self.attached}
+    def as_dict(self) -> dict[str, str | int | bool]:
+        return {
+            "name": self.name,
+            "grid": self.grid,
+            "attached": self.attached,
+            "ended": self.ended,
+        }
 
 
 def validate_cells(value: str) -> tuple[int, int]:
@@ -57,6 +65,29 @@ def ended_message(session: str, desktop: str) -> str:
     )
 
 
+def exited_message(session: str, desktop: str, status: int | None) -> str:
+    """Refusal for ``send`` on a session whose shell has exited: typing would go nowhere."""
+    exit_text = f"with status {status}" if status is not None else "(status unknown)"
+    return (
+        f"term session {session!r} in desktop {desktop!r} has ended: "
+        f"its shell exited {exit_text}. "
+        "Read what it left with `deskbench term screen`, then `deskbench term stop` and "
+        "`deskbench term start` to start a fresh one"
+    )
+
+
+def retained_message(session: str, desktop: str, status: int | None) -> str:
+    """Refusal for ``start`` while an ended session still holds its pane."""
+    exit_text = f"with status {status}" if status is not None else "(status unknown)"
+    return (
+        f"term session {session!r} in desktop {desktop!r} has ended: "
+        f"its shell exited {exit_text}, "
+        "and the pane is kept so `deskbench term screen` can read it. "
+        "`deskbench term stop` clears "
+        "it, then `deskbench term start` can start a fresh one"
+    )
+
+
 def _target(session: str) -> str:
     """Exact session name, for session-level commands."""
     return f"={session}"
@@ -68,7 +99,12 @@ def _pane_target(session: str) -> str:
 
 
 def new_session_args(session: str, cols: int, rows: int) -> list[str]:
-    return ["new-session", "-d", "-s", session, "-x", str(cols), "-y", str(rows), "sh", "-l"]
+    # One tmux invocation: the shell cannot exit before remain-on-exit is on, so its frame and
+    # status stay in the pane. ";" is tmux's own command separator, passed as its own argument.
+    return [
+        "new-session", "-d", "-s", session, "-x", str(cols), "-y", str(rows), "sh", "-l",
+        ";", "set-option", "-w", "-t", _pane_target(session), "remain-on-exit", "on",
+    ]
 
 
 def has_session_args(session: str) -> list[str]:
@@ -115,13 +151,25 @@ def list_args() -> list[str]:
     return ["list-windows", "-a", "-F", _LIST_FORMAT]
 
 
+def pane_status_args(session: str) -> list[str]:
+    return ["display-message", "-p", "-t", _pane_target(session), _STATUS_FORMAT]
+
+
+def parse_pane_status(text: str) -> tuple[bool, int | None]:
+    """``(dead, exit_status)`` from ``pane_status_args`` output; status is known only when dead."""
+    fields = text.split()
+    dead = bool(fields) and fields[0] == "1"
+    status = int(fields[1]) if dead and len(fields) > 1 and fields[1].isdigit() else None
+    return dead, status
+
+
 def parse_list(text: str) -> list[TermSession]:
     """Sessions from ``list_args`` output; only each session's active window carries its grid."""
     sessions = []
     for line in text.splitlines():
         fields = line.split("\t")
-        if len(fields) != 5 or fields[4] != "1":
+        if len(fields) != 6 or fields[4] != "1":
             continue
-        name, attached, cols, rows, _ = fields
-        sessions.append(TermSession(name, int(cols), int(rows), int(attached)))
+        name, attached, cols, rows, _, dead = fields
+        sessions.append(TermSession(name, int(cols), int(rows), int(attached), dead == "1"))
     return sessions

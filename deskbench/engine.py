@@ -584,6 +584,11 @@ def _require_term(desktop: Desktop, session: str) -> None:
         raise EngineError(term.ended_message(session, desktop.name))
 
 
+def _pane_status(desktop: Desktop, session: str) -> tuple[bool, int | None]:
+    """``(dead, exit_status)`` of the session's pane; a dead pane's shell has exited."""
+    return term.parse_pane_status(_tmux(desktop, term.pane_status_args(session)).stdout or "")
+
+
 def _image_of(desktop: Desktop) -> str:
     proc = _podman(["inspect", "--format", "{{.Config.Image}}", desktop.container], check=False)
     return (proc.stdout or "").strip() or desktop.container
@@ -606,6 +611,9 @@ def term_start(name: str, cols: int, rows: int, session: str) -> None:
     if report["tmux"] is None:
         raise EngineError(capabilities.tmux_install_message(report, _where(desktop)))
     if _term_exists(desktop, session):
+        dead, status = _pane_status(desktop, session)
+        if dead:
+            raise EngineError(term.retained_message(session, name, status))
         raise EngineError(f"term session {session!r} already exists in desktop {name!r}")
 
     _tmux(desktop, term.new_session_args(session, cols, rows))
@@ -630,6 +638,9 @@ def term_screen(name: str, session: str, history: int = 0) -> str:
 def term_send(name: str, session: str, text: str | None = None, key: str | None = None) -> None:
     desktop = get(name)
     _require_term(desktop, session)
+    dead, status = _pane_status(desktop, session)
+    if dead:
+        raise EngineError(term.exited_message(session, name, status))
     if key is not None:
         _tmux(desktop, term.send_key_args(session, key))
         return

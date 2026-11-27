@@ -39,7 +39,9 @@ Containers without those labels fall back to the built-in layout (port 6080, the
 Terminal sessions are state too, and they live inside the container: a tmux server owned by the
 container's run user holds them and dies with the `--rm` container. Nothing on the host records which
 sessions exist; `term list` asks tmux, so a session cannot survive its desktop and a stale host file
-cannot invent one. Capabilities are the opposite kind of fact: they are probed on every
+cannot invent one. A session's pane also outlives its shell (`remain-on-exit`), so an ended session
+stays readable — with its exit status — until `term stop`, which is what keeps a human's `Ctrl-D` in a
+shared pane from erasing the agent's transcript. Capabilities are the opposite kind of fact: they are probed on every
 `capabilities` call and whenever `term start` needs tmux, because an agent can install into a
 container at any time and a recorded answer would go stale. Only facts frozen at creation — the
 viewer, the screenshot command, the run user, the flavour name — are labels.
