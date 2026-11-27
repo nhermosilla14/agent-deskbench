@@ -1,8 +1,9 @@
 # Capability is probed live, not frozen in labels
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-27
 - Deciders: Nicolás Hermosilla Polanco
+- Approved by: Nicolás Hermosilla Polanco
 - Spec area: terminal.md, cli.md
 
 ## Context

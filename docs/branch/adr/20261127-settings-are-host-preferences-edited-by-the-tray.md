@@ -1,8 +1,9 @@
 # Settings are host preferences edited by the tray
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-27
 - Deciders: Nicolás Hermosilla Polanco
+- Approved by: Nicolás Hermosilla Polanco
 - Spec area: settings.md, lifecycle.md
 
 ## Context

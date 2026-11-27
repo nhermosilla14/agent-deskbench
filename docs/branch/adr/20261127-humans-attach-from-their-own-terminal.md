@@ -1,8 +1,9 @@
 # Humans attach from their own terminal, and a private shell exists
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-27
 - Deciders: Nicolás Hermosilla Polanco
+- Approved by: Nicolás Hermosilla Polanco
 - Spec area: terminal.md, lifecycle.md
 
 ## Context
@@ -50,7 +51,8 @@ has changed, so the two-second poll no longer makes items flicker under the poin
 multiplexer. It appears in neither `term list` nor the tray, and it is the documented place for
 anything the agent must not read.
 
-No terminal emulator is added to the image, and there is no web terminal.
+The image keeps the xterm it already ships, but nothing in the CLI opens a terminal window on the
+desktop: the human's terminal is the host's. No web terminal is added.
 
 ## Alternatives considered
 

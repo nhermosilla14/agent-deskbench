@@ -15,9 +15,16 @@ the working directory, environment and background jobs survive between calls.
 ## Acceptance criteria
 
 - `deskbench term start NAME --cells WxH [--session S]` starts a session inside the desktop that
-  runs the image's login shell, fixes its grid to exactly the requested size, and returns only once
-  the session answers. The grid is required: the caller states the size the program needs instead of
-  inheriting a default the program was not designed for.
+  runs `sh` as a login shell, named explicitly so a missing or `nologin` passwd entry in a third-party
+  image cannot stop the session from starting. It fixes the grid to the requested size within
+  plausible bounds (20–500 columns, 5–200 rows) and returns only once the session answers. The grid is
+  required: the caller states the size the program needs instead of inheriting a default the program
+  was not designed for.
+- The grid is pinned so an attached client cannot reflow it, the pin is verified by reading it back,
+  and a tmux that cannot pin fails `term start` naming the limitation instead of starting a session
+  whose size will drift.
+- A session ends when its shell exits. `term screen` and `term send` on a session that has ended say
+  so and fail, rather than acting on a dead pane.
 - Several sessions may exist per desktop (`--session`, default `main`); a duplicate name exits 1
   naming the session.
 - `deskbench term screen NAME [--session S] [--history N]` prints the visible screen as plain text
@@ -34,15 +41,16 @@ the working directory, environment and background jobs survive between calls.
 - A session outlives its attached clients: with nobody attached it stays readable and writable, and
   the agent's reads do not disturb whoever is attached.
 - `deskbench capabilities NAME [--json]` reports, from a live probe, whether the desktop has the
-  shell, the screenshot tool, tmux, a terminal emulator and sudo, with the resolved path for each.
-  It also reports which package managers the image offers (`apt-get`, `dnf`, `zypper`, `apk`,
-  `pacman`, `brew`) and whether the root filesystem is writable, so an agent installs what is missing
-  the way that image expects instead of assuming Debian. The answer reflects the container as it is
-  now, so it is still true after the agent installs something.
+  shell, the screenshot tool, tmux and sudo, with the resolved path for each. It also reports which
+  package managers the image offers (`apt-get`, `dnf`, `zypper`, `apk`, `pacman`, `brew`) and whether
+  a privileged write is possible, measured with sudo when it is available rather than as the
+  unprivileged user, so an agent installs what is missing the way that image expects instead of
+  assuming Debian. The answer reflects the container as it is now, so it is still true after the agent
+  installs something. Its JSON keys are part of the CLI contract.
 - `term start` probes tmux at first use rather than trusting a recorded answer. When it is absent it
-  exits 1 naming the flavour, the missing capability and how to obtain it on that image: the
-  distribution's own package manager when the root is writable, Homebrew as the fallback for
-  immutable images. No message assumes apt.
+  exits 1 naming the flavour, the missing capability and how to obtain it on that image: its native
+  package manager when one is present and a privileged write is possible, Homebrew as the fallback for
+  immutable images when it exists. No message assumes apt.
 - The skill's package-installation guidance names no single package manager: it tells the agent to
   read the distribution, prefer the image's native manager, and fall back to Homebrew only when the
   image cannot install packages the usual way.
