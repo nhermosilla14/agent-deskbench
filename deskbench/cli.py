@@ -15,7 +15,7 @@ from . import engine, flavours, hostterm, lock, sessions, term
 from .engine import EngineError
 
 PROGRAM = "deskbench"
-VERSION = "0.1.0"
+VERSION = "1.0.0"
 
 # Verbs that need PyGObject (GTK, AppIndicator, the notification service).
 GUI_VERBS = {"tray", "ask"}

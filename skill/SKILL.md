@@ -11,7 +11,7 @@ description: |
   Do not use it for web-only testing (a browser devtools protocol is far faster), for non-Linux GUI
   toolkits, or for terminal-only work that your own shell can already do.
 metadata:
-  version: 0.1.0
+  version: 1.0.0
 ---
 
 # agent-deskbench
