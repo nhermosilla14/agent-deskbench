@@ -6,9 +6,10 @@ description: |
   touching the human's mouse, keyboard or screen. Use this whenever a task needs a real display for a
   GUI application: launching a windowed program, taking a screenshot of an app, testing or debugging a
   desktop UI, reproducing a visual bug, or when something "needs a display" and the machine has none
-  free. Also use it when you must hand control to a human for a moment and wait for them.
+  free. Also use it when you must hand control to a human for a moment and wait for them, or when an
+  interactive program needs a real terminal you can read as text.
   Do not use it for web-only testing (a browser devtools protocol is far faster), for non-Linux GUI
-  toolkits, or for terminal-only work.
+  toolkits, or for terminal-only work that your own shell can already do.
 metadata:
   version: 0.1.0
 ---
@@ -70,6 +71,14 @@ deskbench stop check
 | `logs NAME [-n N]` | Tail of the container log |
 | `stop NAME` | Destroy it, including everything you created inside |
 | `ask NAME MESSAGE` | Notify the human and block until they answer |
+| `capabilities NAME [--json]` | What the desktop has right now: shell, screenshot tool, tmux, sudo, package managers |
+| `term start NAME --cells WxH [--session S]` | Open a session you can read and type into |
+| `term screen NAME [--session S] [--history N]` | The session's visible screen, as plain text |
+| `term send NAME -- TEXT` or `--key K` | Type text plus Enter, or one named key |
+| `term list NAME [--json]` | Sessions, their grid and how many clients are attached |
+| `term stop NAME [--session S]` | End one session and keep the desktop |
+| `term attach NAME [--session S]` | Open the session in your own terminal (the tray does the same) |
+| `shell NAME` | A private interactive shell that no multiplexer manages |
 
 Names are lowercase letters, digits and hyphens. Without `--name` you get `desk1`, `desk2`, and so on.
 
@@ -90,7 +99,7 @@ deskbench images
 Rules of thumb:
 
 - Use a browser flavour instead of installing a browser yourself. The base image is bare on purpose,
-  so `apt-get install firefox-esr` costs a network round trip *every* session.
+  so installing one by hand costs a network round trip *every* session.
 - Stay on `base` when you are going to install packages anyway, or when the app is native. A flavour
   costs one pull the first time; installing by hand costs minutes every time.
 - `--pull=missing` (the default) uses a local image and pulls only when needed; `--pull=always`
@@ -122,6 +131,40 @@ deskbench exec dev -- sh -c 'cd /mnt/app && ./build/my-app'
 Mounts are read-write unless you say `:ro`, and changes round-trip to the host, so an edit on the
 host is visible inside without restarting the desktop.
 
+## Terminal sessions
+
+`exec` is one command per call and keeps nothing: no working directory, no way to answer a prompt, no
+view of a full-screen program. When you need those, open a session.
+
+```sh
+deskbench term start dev --cells 120x40          # the grid is required: columns x rows
+deskbench term send dev -- ./installer --flag    # types it, then presses Enter
+deskbench term screen dev                        # the visible screen, as text
+deskbench term screen dev --history 200          # plus scrollback above it
+deskbench term send dev --key C-c                # one key: a prompt, a stuck program, a TUI
+deskbench term stop dev                          # when you are done with it
+```
+
+- `80x24` is the grid every program was designed for; widen it for diffs and logs. Whatever you pick
+  is pinned, so nothing that happens on the other side reflows what you read.
+- `screen` is a text screenshot: the visible pane, which is what a human would be reading. There is
+  no image to interpret and no OCR.
+- It is a real shell, so `cd`, `export` and an activated virtualenv survive between commands. Answer
+  a prompt with `send`, including control keys.
+- Full-screen programs are readable this way (`top`, `htop`, `less`, a TUI you are testing): you get
+  the frame, not escape soup.
+- If its shell exits — your own `exit`, or a human pressing `Ctrl-D` in a shared pane — the pane is
+  kept: `term screen` still shows the last frame and the exit status, `term send` refuses, and
+  `term stop` clears it so `term start` can begin again. Nothing is lost silently.
+- `term list` shows what exists; a session outlives your detaching from it, and its pane outlives the
+  exit of its shell.
+- **A session is shared.** A human can join the same pane from their own terminal — `term attach`, or
+  the tray's Terminals menu — and sees exactly what `screen` shows you. What they type, you can read;
+  what you type, they see. It is not a private channel.
+- When a human must type a password, a token or a key, point them at `deskbench shell NAME` instead:
+  it is an interactive shell with no multiplexer, so it appears in neither `term list` nor the tray
+  and you cannot read it. Never invite a secret into a listed session.
+
 ## Handing control to a human
 
 Use `ask` when a decision, a login, a CAPTCHA or a visual judgement is beyond you. It shows a desktop
@@ -130,6 +173,11 @@ notification containing the viewer URL, makes the tray icon pulse, and blocks:
 ```sh
 deskbench ask check --timeout 120 "The Save dialog is asking for a filename; please choose one"
 ```
+
+If the work is in a terminal session, say so in the message: the human can join that same session
+from the tray, or with `deskbench term attach NAME`, and type in the pane you are reading. After they
+answer, take a fresh `shot` — or `term screen` for a session — because the screen changed underneath
+you.
 
 Exit codes matter: `0` the human pressed *I'm done*, `4` they did not answer in time, `5` the request
 was dismissed or the desktop or notification service went away. After `0`, take a fresh `shot` — the
@@ -149,9 +197,13 @@ screen has changed underneath you.
   vanish. Do not stop until you have what you need.
 - **You are not root inside.** Built-in images run everything as the unprivileged user `agent`
   (uid 1000), so applications behave as they would on a workstation instead of hitting root-only
-  paths and sandbox refusals. A third-party flavour can choose another `[run].user`; `exec` uses the
-  user recorded at creation. When you genuinely need packages, `sudo` is passwordless:
-  `deskbench exec NAME -- sudo apt-get install -y ...`
+  paths and sandbox refusals. A third-party flavour can choose another `[run].user`; `exec` and
+  `term` use the user recorded at creation. When you genuinely need packages, `sudo` is passwordless.
+- **Install the way the image expects, not the way you remember.** Run
+  `deskbench capabilities NAME` first: it reports the package managers the image actually has, whether
+  a privileged write is possible, and whether tmux and a screenshot tool are there. Use the image's
+  native manager. Fall back to Homebrew only when the image cannot write to its root filesystem, which
+  is what immutable distributions look like. Never assume `apt-get`.
 - **Bind mounts keep their ownership**: files you create inside a mount are owned by you on the
   host, and host files keep their owner inside.
 - **Always create desktops through `deskbench new`.** A bare `podman run` has no label, so `ls` and the
@@ -163,5 +215,14 @@ screen has changed underneath you.
 
 - `exec` runs `sh -lc` with your arguments quoted, so pipes, `&&` and redirection work, and
   `$DISPLAY` is already `:1` inside the container.
+- `term start` runs `sh -l` as the recorded user; `term send` quotes nothing for you, so pass the
+  command exactly as you would type it.
 - Launch long-running apps with a trailing `&`; `exec` returns when the command returns.
+- A session is not a log: `screen` shows the visible pane. For a long build, `--history`, or run it
+  under `exec` and read `logs`.
+- `term attach` finds a terminal emulator on the host (`$TERMINAL`, `xdg-terminal-exec`, then the
+  common ones); `DESKBENCH_TERMINAL` overrides it. `term attach --print` shows the command it would
+  run and spawns nothing — useful for testing, not an interface to rely on.
+- The tray's Settings window holds one value for now, the default grid for `New terminal…`; it does
+  not change what `term start` requires.
 - A desktop with the same name as an existing one is refused; pick another or stop the old one.

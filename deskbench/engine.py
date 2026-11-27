@@ -20,9 +20,10 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import flavours, runtime as runtimes, sessions
+from . import capabilities, flavours, runtime as runtimes, sessions, term
 
 SHOT_PATH_TEMPLATE = "/tmp/deskbench-shot-{unique}.png"
+TERM_TIMEOUT = 30
 
 
 class EngineError(RuntimeError):
@@ -191,6 +192,7 @@ def _label_args(flavour: flavours.Flavour) -> list[str]:
         (sessions.VIEWER_PATH_LABEL, flavour.viewer.path),
         (sessions.VIEWER_SCHEME_LABEL, flavour.viewer.scheme),
         (sessions.RUN_USER_LABEL, flavour.run.user),
+        (sessions.FLAVOUR_LABEL, flavour.name),
     ]
     if flavour.screenshot.command is not None:
         settle = True if flavour.screenshot.settle is None else flavour.screenshot.settle
@@ -535,3 +537,153 @@ def logs(name: str, tail: int = 40) -> str:
     container = get(name).container
     proc = _podman(["logs", "--tail", str(tail), container], capture=True, check=False)
     return (proc.stdout or "") + (proc.stderr or "")
+
+
+def _capability_report(desktop: Desktop) -> dict:
+    args = ["exec"]
+    user = desktop.labels.get(sessions.RUN_USER_LABEL)
+    if user:
+        args.extend(["--user", user])
+    args.extend([desktop.container, "sh", "-lc", capabilities.PROBE_SCRIPT])
+    proc = _podman(args, check=False, timeout=30)
+    if proc.returncode != 0:
+        raise EngineError(f"could not probe capabilities: {(proc.stderr or '').strip()}")
+    try:
+        return capabilities.parse_report(proc.stdout or "")
+    except ValueError as exc:
+        raise EngineError(str(exc)) from exc
+
+
+def capabilities_of(name: str) -> dict:
+    """Probe the desktop now; nothing is recorded, so the answer tracks installs."""
+    return _capability_report(get(name))
+
+
+def _tmux(desktop: Desktop, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    """Run tmux inside the desktop as the user it was started with, bounded so a wedged exec
+    cannot block the caller."""
+    command = ["exec"]
+    user = desktop.labels.get(sessions.RUN_USER_LABEL)
+    if user:
+        command.extend(["--user", user])
+    command.extend([desktop.container, "tmux", *args])
+    return _podman(command, check=check, timeout=TERM_TIMEOUT)
+
+
+def _term_exists(desktop: Desktop, session: str) -> bool:
+    proc = _tmux(desktop, term.has_session_args(session), check=False)
+    if proc.returncode == 0:
+        return True
+    if proc.returncode == 1:
+        return False
+    raise EngineError((proc.stderr or "").strip() or "tmux has-session failed")
+
+
+def _require_term(desktop: Desktop, session: str) -> None:
+    if not _term_exists(desktop, session):
+        raise EngineError(term.ended_message(session, desktop.name))
+
+
+def _pane_status(desktop: Desktop, session: str) -> tuple[bool, int | None]:
+    """``(dead, exit_status)`` of the session's pane; a dead pane's shell has exited."""
+    return term.parse_pane_status(_tmux(desktop, term.pane_status_args(session)).stdout or "")
+
+
+def _image_of(desktop: Desktop) -> str:
+    proc = _podman(["inspect", "--format", "{{.Config.Image}}", desktop.container], check=False)
+    return (proc.stdout or "").strip() or desktop.container
+
+
+def _where(desktop: Desktop) -> str:
+    """Name the flavour the desktop was created from, and its image; ad-hoc ``--image`` runs
+    have no flavour name worth showing, so only the image is named for them."""
+    image = f"image {_image_of(desktop)!r}"
+    flavour = desktop.labels.get(sessions.FLAVOUR_LABEL)
+    if flavour and flavour != "image":
+        return f"flavour {flavour!r} ({image})"
+    return image
+
+
+def term_start(name: str, cols: int, rows: int, session: str) -> None:
+    """Start a pinned ``sh -l`` session and return once tmux answers for it."""
+    desktop = get(name)
+    report = _capability_report(desktop)
+    if report["tmux"] is None:
+        raise EngineError(capabilities.tmux_install_message(report, _where(desktop)))
+    if _term_exists(desktop, session):
+        dead, status = _pane_status(desktop, session)
+        if dead:
+            raise EngineError(term.retained_message(session, name, status))
+        raise EngineError(f"term session {session!r} already exists in desktop {name!r}")
+
+    _tmux(desktop, term.new_session_args(session, cols, rows))
+    pin = _tmux(desktop, term.pin_args(session), check=False)
+    read = _tmux(desktop, term.read_pin_args(session), check=False)
+    if pin.returncode != 0 or read.returncode != 0 or read.stdout.strip() != "manual":
+        _tmux(desktop, term.kill_session_args(session), check=False)
+        raise EngineError(
+            "the tmux in this image cannot pin the window size (window-size manual); "
+            "term start refuses rather than start a session whose size would drift"
+        )
+    if not _term_exists(desktop, session):
+        raise EngineError(f"term session {session!r} did not answer after starting")
+
+
+def term_screen(name: str, session: str, history: int = 0) -> str:
+    desktop = get(name)
+    _require_term(desktop, session)
+    return _tmux(desktop, term.capture_args(session, history)).stdout or ""
+
+
+def term_send(name: str, session: str, text: str | None = None, key: str | None = None) -> None:
+    desktop = get(name)
+    _require_term(desktop, session)
+    dead, status = _pane_status(desktop, session)
+    if dead:
+        raise EngineError(term.exited_message(session, name, status))
+    if key is not None:
+        _tmux(desktop, term.send_key_args(session, key))
+        return
+    _tmux(desktop, term.send_text_args(session, text or ""))
+    _tmux(desktop, term.send_enter_args(session))
+
+
+def term_list(name: str) -> list[term.TermSession]:
+    desktop = get(name)
+    proc = _tmux(desktop, term.list_args(), check=False)
+    if proc.returncode != 0:
+        if "no server running" in (proc.stderr or ""):
+            return []
+        raise EngineError((proc.stderr or "").strip() or "tmux list-windows failed")
+    return term.parse_list(proc.stdout or "")
+
+
+def term_stop(name: str, session: str) -> None:
+    desktop = get(name)
+    _require_term(desktop, session)
+    _tmux(desktop, term.kill_session_args(session))
+
+
+def _interactive(desktop: Desktop, command: list[str]) -> list[str]:
+    """Runtime argv for ``exec -it`` as the user the desktop was started with."""
+    try:
+        binary = runtimes.detect().binary
+    except runtimes.MissingRuntime as exc:
+        raise EngineError(str(exc)) from exc
+    args = [binary, "exec", "-it"]
+    user = desktop.labels.get(sessions.RUN_USER_LABEL)
+    if user:
+        args.extend(["--user", user])
+    return [*args, desktop.container, *command]
+
+
+def term_attach_command(name: str, session: str) -> list[str]:
+    """Runtime argv that attaches a terminal to ``session``; checks the desktop and session first."""
+    desktop = get(name)
+    _require_term(desktop, session)
+    return _interactive(desktop, ["tmux", *term.attach_args(session)])
+
+
+def shell_command(name: str) -> list[str]:
+    """Runtime argv for a private ``sh -l``. It has no multiplexer, so it is never a session."""
+    return _interactive(get(name), ["sh", "-l"])

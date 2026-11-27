@@ -20,8 +20,8 @@ version.
 
 | Process | Lifetime | Responsibility |
 |---|---|---|
-| `deskbench` (CLI) | one invocation | create, list, exec, capture, stop; spawns the tray on first desktop |
-| `deskbench tray` | first desktop → last desktop | StatusNotifierItem, menu, refresh on Podman events, exit at zero |
+| `deskbench` (CLI) | one invocation | create, list, exec, capture, run terminal sessions, probe capabilities, stop; spawns the tray on first desktop |
+| `deskbench tray` | first desktop → last desktop | StatusNotifierItem, menu (viewer, terminals, private shell, settings), refresh on Podman events, exit at zero |
 | `podman` | always | container lifecycle and the authoritative list of desktops |
 | desktop container | per desktop | `Xvnc` + `openbox` + `websockify`/noVNC |
 
@@ -36,12 +36,30 @@ Containers without those labels fall back to the built-in layout (port 6080, the
 `http`, user `1000:1000`) and, for screenshots, to probing the image for `deskbench-capture`,
 `scrot` or `import`.
 
+Terminal sessions are state too, and they live inside the container: a tmux server owned by the
+container's run user holds them and dies with the `--rm` container. Nothing on the host records which
+sessions exist; `term list` asks tmux, so a session cannot survive its desktop and a stale host file
+cannot invent one. A session's pane also outlives its shell (`remain-on-exit`), so an ended session
+stays readable — with its exit status — until `term stop`, which is what keeps a human's `Ctrl-D` in a
+shared pane from erasing the agent's transcript. Capabilities are the opposite kind of fact: they are probed on every
+`capabilities` call and whenever `term start` needs tmux, because an agent can install into a
+container at any time and a recorded answer would go stale. Only facts frozen at creation — the
+viewer, the screenshot command, the run user, the flavour name — are labels.
+
+The one host file is the user's preferences, `$XDG_CONFIG_HOME/agent-deskbench/settings.toml`, beside
+the flavour manifests. It holds a preference that cannot be derived from the runtime (today, the
+default grid for tray-started terminals), never desktop state, and the tray is its only writer. The
+desktop rule above is unchanged: a preference cannot invent a desktop, list one or outlive one.
+
 ## Images
 
 The built-in flavours are OCI image references (`base`, `firefox`, `chromium`) under
 `ghcr.io/nhermosilla14/agent-deskbench`, redirected at call time by `DESKBENCH_REGISTRY`. `new`
 pulls a missing reference and never builds. `image/` and `image/flavours/*` are the build inputs for
-`task image` and the publishing pipeline, not a runtime dependency.
+`task image` and the publishing pipeline, not a runtime dependency. The base image ships `tmux` from
+Debian so every built-in satisfies the terminal contract; a third-party image may not, which is why
+`term start` probes before it starts and `capabilities` reports the package managers that image
+actually has.
 
 User flavours live in `$XDG_CONFIG_HOME/agent-deskbench/flavours/<name>/flavour.toml` (default
 `~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference,
@@ -73,8 +91,14 @@ lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the 
 | `deskbench.engine` | the only module that talks to Podman |
 | `deskbench.flavours` | built-in and user flavour discovery, manifests, registry override and reference validation |
 | `deskbench.sessions` | naming, URL derivation, size parsing |
+| `deskbench.term` | tmux argument builders, grid rules and the session-list parser, with no I/O |
+| `deskbench.capabilities` | the live probe script, its report parser and the install-route message, with no I/O |
+| `deskbench.hostterm` | terminal-emulator lookup and the argv to run a command in one, with no I/O |
+| `deskbench.settings` | the XDG preferences file: read, validate, atomic write |
 | `deskbench.lock` | tray singleton and liveness via a lifetime-held flock |
-| `deskbench.tray` | GTK/AppIndicator icon, menu, event loop, flock |
+| `deskbench.tray` | GTK/AppIndicator icon, worker polling, menu rendering, settings dialog, flock |
+| `deskbench.tray_menu` | the tray's menu content as data, plus the signature that decides a rebuild |
+| `deskbench.settings_window` | the GTK dialog that edits the user's settings |
 | `deskbench.notify` | `ask`: notification with actions, blocking until done |
 
 ## Boundaries
@@ -88,4 +112,6 @@ lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the 
 - `sudo` inside the container escalates to the namespace root, which is not the host root: it cannot
   touch host files the invoking user does not already own.
 - The viewer port is published on `127.0.0.1` only.
-- The tray and the CLI share no state and never call each other; both read Podman.
+- The tray and the CLI share no state and never call each other; both read Podman. The tray spawns
+  processes only through the same functions the CLI uses (`xdg-open` for the viewer, the attach path
+  for a terminal), and writes exactly one host file, the user's settings.

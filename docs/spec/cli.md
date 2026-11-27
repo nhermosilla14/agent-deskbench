@@ -82,6 +82,21 @@ recorded on the container.
   - The command succeeds for a running desktop.
 - Tests: tests.test_cli.AgentSurface.test_logs_returns_something
 
+### Capabilities
+`deskbench capabilities NAME [--json]` reports what a desktop can do right now, from one live probe.
+- Criteria:
+  - It reports the shell, the screenshot tool, tmux and sudo with resolved paths where they exist,
+    the package managers present (`apt-get`, `dnf`, `zypper`, `apk`, `pacman`, `brew`), and whether a
+    privileged write is possible.
+  - Writability is measured with passwordless sudo when it works, otherwise as the plain user, and
+    the report says which identity measured it.
+  - Nothing is recorded: installing a package changes the next answer.
+  - `--json` prints one object and the plain output prints one line per entry; stdout carries only
+    the report.
+  - The JSON keys are part of the interface.
+  - An unknown desktop fails before running anything.
+- Tests: tests.test_capabilities.Report.test_parses_a_debian_like_probe, tests.test_capabilities.Report.test_screenshot_falls_back_to_the_first_tool_present, tests.test_capabilities.Report.test_refuses_output_without_the_write_line, tests.test_capabilities.Report.test_unprivileged_write_is_reported_as_measured, tests.test_capabilities.InstallRoute.test_debian_like_image_is_told_to_use_apt, tests.test_capabilities.InstallRoute.test_alpine_like_image_is_told_to_use_apk_and_never_apt, tests.test_capabilities.InstallRoute.test_immutable_image_with_brew_is_routed_to_brew_and_never_apt, tests.test_capabilities.InstallRoute.test_immutable_image_without_brew_says_packages_cannot_be_installed, tests.test_capabilities.Probe.test_capabilities_json_has_the_contracted_keys, tests.test_capabilities.Probe.test_capabilities_human_output_names_tmux
+
 ## Not supported
 
 - Bulk operations and filters; one desktop per invocation keeps the exit code meaningful.
