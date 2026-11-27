@@ -1,8 +1,9 @@
 # Terminal sessions the agent can read and type into
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-27
 - Owner: Nicolás Hermosilla Polanco
+- Approved by: Nicolás Hermosilla Polanco
 
 ## Goal
 

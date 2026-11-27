@@ -1,8 +1,9 @@
 # Join a session from the developer's own terminal, and list sessions in the tray
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-27
 - Owner: Nicolás Hermosilla Polanco
+- Approved by: Nicolás Hermosilla Polanco
 - Depends on: 20261127-terminal-sessions
 
 ## Goal
