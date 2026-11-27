@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import engine, flavours, lock, sessions
+from . import engine, flavours, lock, sessions, term
 from .engine import EngineError
 
 PROGRAM = "deskbench"
@@ -132,6 +132,47 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("message")
     ask.add_argument("-t", "--timeout", type=int, default=600, help="seconds to wait")
     ask.set_defaults(handler=cmd_ask)
+
+    capabilities = subparsers.add_parser(
+        "capabilities", help="report what a desktop can do right now (shell, tmux, package managers)"
+    )
+    capabilities.add_argument("name")
+    capabilities.add_argument("--json", action="store_true", help="machine-readable output")
+    capabilities.set_defaults(handler=cmd_capabilities)
+
+    terminal = subparsers.add_parser("term", help="tmux sessions inside a desktop")
+    term_verbs = terminal.add_subparsers(dest="term_verb", required=True)
+
+    term_start_parser = term_verbs.add_parser("start", help="start a session at a fixed grid")
+    term_start_parser.add_argument("name")
+    term_start_parser.add_argument("--cells", required=True, metavar="WxH",
+                                   help="grid in character cells, columns x rows (required)")
+    term_start_parser.add_argument("--session", default=term.DEFAULT_SESSION, help="session name")
+    term_start_parser.set_defaults(handler=cmd_term_start)
+
+    term_screen_parser = term_verbs.add_parser("screen", help="print a session's visible screen")
+    term_screen_parser.add_argument("name")
+    term_screen_parser.add_argument("--session", default=term.DEFAULT_SESSION, help="session name")
+    term_screen_parser.add_argument("--history", type=int, default=0, metavar="N",
+                                    help="also print up to N lines of scrollback")
+    term_screen_parser.set_defaults(handler=cmd_term_screen)
+
+    term_send_parser = term_verbs.add_parser("send", help="type text, or one key, into a session")
+    term_send_parser.add_argument("name")
+    term_send_parser.add_argument("--session", default=term.DEFAULT_SESSION, help="session name")
+    term_send_parser.add_argument("--key", metavar="KEY", help="send one named key, such as C-c")
+    term_send_parser.add_argument("text", nargs="?", help="-- TEXT, typed then followed by Enter")
+    term_send_parser.set_defaults(handler=cmd_term_send)
+
+    term_list_parser = term_verbs.add_parser("list", help="list a desktop's sessions")
+    term_list_parser.add_argument("name")
+    term_list_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    term_list_parser.set_defaults(handler=cmd_term_list)
+
+    term_stop_parser = term_verbs.add_parser("stop", help="end one session")
+    term_stop_parser.add_argument("name")
+    term_stop_parser.add_argument("--session", default=term.DEFAULT_SESSION, help="session name")
+    term_stop_parser.set_defaults(handler=cmd_term_stop)
 
     tray = subparsers.add_parser("tray", help=argparse.SUPPRESS)
     tray.set_defaults(handler=cmd_tray)
@@ -269,6 +310,64 @@ def cmd_stop(args: argparse.Namespace) -> int:
     engine.stop(args.name)
     lock.poke()
     print(f"{PROGRAM}: stopped {args.name}", file=sys.stderr)
+    return 0
+
+
+def cmd_capabilities(args: argparse.Namespace) -> int:
+    report = engine.capabilities_of(args.name)
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    for tool in ("shell", "screenshot", "tmux", "sudo"):
+        print(f"{tool}: {report[tool] or 'absent'}")
+    for manager, path in report["package_managers"].items():
+        print(f"{manager}: {path or 'absent'}")
+    write = report["privileged_write"]
+    print(f"privileged write: {'yes' if write['possible'] else 'no'} "
+          f"(measured with {write['measured_with']})")
+    return 0
+
+
+def cmd_term_start(args: argparse.Namespace) -> int:
+    cols, rows = term.validate_cells(args.cells)
+    session = sessions.validate_name(args.session)
+    engine.term_start(args.name, cols, rows, session)
+    return 0
+
+
+def cmd_term_screen(args: argparse.Namespace) -> int:
+    if args.history < 0:
+        raise sessions.SessionError("--history must be zero or more lines")
+    session = sessions.validate_name(args.session)
+    print(engine.term_screen(args.name, session, args.history), end="")
+    return 0
+
+
+def cmd_term_send(args: argparse.Namespace) -> int:
+    if (args.text is None) == (args.key is None):
+        raise sessions.SessionError("give either TEXT or --key KEY, not both and not neither")
+    session = sessions.validate_name(args.session)
+    engine.term_send(args.name, session, args.text, args.key)
+    return 0
+
+
+def cmd_term_list(args: argparse.Namespace) -> int:
+    listed = engine.term_list(args.name)
+    if args.json:
+        print(json.dumps([entry.as_dict() for entry in listed], indent=2))
+        return 0
+    if not listed:
+        print("no term sessions")
+        return 0
+    width = max(len(entry.name) for entry in listed)
+    for entry in listed:
+        print(f"{entry.name:<{width}}  {entry.grid:<9}  attached {entry.attached}")
+    return 0
+
+
+def cmd_term_stop(args: argparse.Namespace) -> int:
+    session = sessions.validate_name(args.session)
+    engine.term_stop(args.name, session)
     return 0
 
 

@@ -19,6 +19,7 @@ VIEWER_PATH_LABEL = "deskbench.viewer.path"
 VIEWER_SCHEME_LABEL = "deskbench.viewer.scheme"
 SCREENSHOT_LABEL = "deskbench.screenshot"
 RUN_USER_LABEL = "deskbench.run.user"
+FLAVOUR_LABEL = "deskbench.flavour"
 
 _NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$")
 _SIZE = re.compile(r"^(\d{3,5})x(\d{3,5})$")

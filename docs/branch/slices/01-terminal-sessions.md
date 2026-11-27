@@ -1,5 +1,6 @@
 # Terminal sessions and live capability discovery
 
+- Status: Done
 - Intents: 20261127-terminal-sessions
 - ADRs: 20261127-sessions-are-tmux-read-as-text, 20261127-terminal-geometry-is-explicit-cells,
   20261127-capabilities-are-probed-live

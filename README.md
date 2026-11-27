@@ -46,7 +46,34 @@ deskbench shot NAME [-o PATH]              capture the desktop to a PNG
 deskbench logs NAME [-n N]                 last N lines of the desktop's log
 deskbench stop NAME                        stop one desktop
 deskbench ask NAME [-t SECONDS] MESSAGE    notify the human and block until they are done
+deskbench capabilities NAME [--json]       what the desktop can do right now
+deskbench term start NAME --cells WxH      open a terminal session you can read and type into
+deskbench term screen NAME [--history N]   the session's visible screen, as plain text
+deskbench term send NAME -- TEXT | --key K type into the session, or send one named key
+deskbench term list NAME [--json]          sessions, their grid and attached clients
+deskbench term stop NAME [--session S]     end one session, keep the desktop
 ```
+
+### Terminal sessions
+
+`exec` runs one command per call and keeps nothing: no working directory, no way to answer a prompt,
+no view of a full-screen program. A session is a tmux session inside the desktop, and its visible pane
+is what the agent reads — text instead of a screenshot.
+
+```sh
+deskbench term start dev --cells 80x24         # the grid is required, and pinned
+deskbench term send dev -- ./installer --yes   # types it, then presses Enter
+deskbench term screen dev                      # the visible pane, plain text
+deskbench term screen dev --history 200        # with scrollback above it
+deskbench term send dev --key C-c              # one key, for a prompt or a TUI
+```
+
+Because it is a real shell, `cd`, `export` and an activated virtualenv survive between commands, and a
+full-screen program is readable as a frame rather than escape sequences. The grid is pinned so a
+client cannot reflow what the agent reads; choose `80x24` as a baseline and widen it for diffs and
+logs. Sessions need `tmux` in the image (the built-ins ship it); `deskbench capabilities NAME` reports
+whether a given image has it, along with its package managers and whether a privileged write is
+possible, so an agent installs the way that image expects instead of assuming Debian.
 
 ### Image flavours
 

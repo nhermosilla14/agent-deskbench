@@ -18,6 +18,7 @@ RUN apt-get update \
       scrot \
       procps \
       sudo \
+      tmux \
       fonts-dejavu-core \
       ca-certificates \
  && rm -rf /var/lib/apt/lists/*

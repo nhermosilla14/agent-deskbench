@@ -20,7 +20,7 @@ version.
 
 | Process | Lifetime | Responsibility |
 |---|---|---|
-| `deskbench` (CLI) | one invocation | create, list, exec, capture, stop; spawns the tray on first desktop |
+| `deskbench` (CLI) | one invocation | create, list, exec, capture, run terminal sessions, probe capabilities, stop; spawns the tray on first desktop |
 | `deskbench tray` | first desktop → last desktop | StatusNotifierItem, menu, refresh on Podman events, exit at zero |
 | `podman` | always | container lifecycle and the authoritative list of desktops |
 | desktop container | per desktop | `Xvnc` + `openbox` + `websockify`/noVNC |
@@ -36,12 +36,23 @@ Containers without those labels fall back to the built-in layout (port 6080, the
 `http`, user `1000:1000`) and, for screenshots, to probing the image for `deskbench-capture`,
 `scrot` or `import`.
 
+Terminal sessions are state too, and they live inside the container: a tmux server owned by the
+container's run user holds them and dies with the `--rm` container. Nothing on the host records which
+sessions exist; `term list` asks tmux, so a session cannot survive its desktop and a stale host file
+cannot invent one. Capabilities are the opposite kind of fact: they are probed on every
+`capabilities` call and whenever `term start` needs tmux, because an agent can install into a
+container at any time and a recorded answer would go stale. Only facts frozen at creation — the
+viewer, the screenshot command, the run user — are labels.
+
 ## Images
 
 The built-in flavours are OCI image references (`base`, `firefox`, `chromium`) under
 `ghcr.io/nhermosilla14/agent-deskbench`, redirected at call time by `DESKBENCH_REGISTRY`. `new`
 pulls a missing reference and never builds. `image/` and `image/flavours/*` are the build inputs for
-`task image` and the publishing pipeline, not a runtime dependency.
+`task image` and the publishing pipeline, not a runtime dependency. The base image ships `tmux` from
+Debian so every built-in satisfies the terminal contract; a third-party image may not, which is why
+`term start` probes before it starts and `capabilities` reports the package managers that image
+actually has.
 
 User flavours live in `$XDG_CONFIG_HOME/agent-deskbench/flavours/<name>/flavour.toml` (default
 `~/.config/...`, overridable with `DESKBENCH_FLAVOURS_DIR`). Each manifest names one image reference,
@@ -73,6 +84,8 @@ lives only in `scripts/image-tags.sh`, shared by the workflow, the task and the 
 | `deskbench.engine` | the only module that talks to Podman |
 | `deskbench.flavours` | built-in and user flavour discovery, manifests, registry override and reference validation |
 | `deskbench.sessions` | naming, URL derivation, size parsing |
+| `deskbench.term` | tmux argument builders, grid rules and the session-list parser, with no I/O |
+| `deskbench.capabilities` | the live probe script, its report parser and the install-route message, with no I/O |
 | `deskbench.lock` | tray singleton and liveness via a lifetime-held flock |
 | `deskbench.tray` | GTK/AppIndicator icon, menu, event loop, flock |
 | `deskbench.notify` | `ask`: notification with actions, blocking until done |
